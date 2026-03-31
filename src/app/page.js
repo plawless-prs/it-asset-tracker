@@ -1,313 +1,211 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { createClient } from '../lib/supabase'
+import Link from 'next/link'
 
-export default function DashboardPage() {
-  const supabase = createClient()
-  const [stats, setStats] = useState({
-    totalAssets: 0,
-    deployed: 0,
-    totalBudget: 0,
-    totalSpent: 0,
-    licenseCount: 0,
-    expiringLicenses: [],
-    warrantyAlerts: [],
-    subscriptionCost: 0,
-    recentActivity: [],
-  })
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    loadDashboard()
-  }, [])
-
-  async function loadDashboard() {
-    // Fetch all data in parallel for speed
-    const [
-      { data: assets },
-      { data: licenses },
-      { data: budgets },
-      { data: purchases },
-      { data: subscriptions },
-      { data: activity },
-    ] = await Promise.all([
-      supabase.from('assets').select('*'),
-      supabase.from('licenses').select('*'),
-      supabase.from('budgets').select('*'),
-      supabase.from('purchases').select('*'),
-      supabase.from('subscriptions').select('*'),
-      supabase.from('audit_log').select('*').order('created_at', { ascending: false }).limit(8),
-    ])
-
-    const now = new Date()
-    const thirtyDays = 30 * 24 * 60 * 60 * 1000
-
-    setStats({
-      totalAssets: assets?.length || 0,
-      deployed: assets?.filter(a => a.status === 'Deployed').length || 0,
-      totalBudget: budgets?.reduce((sum, b) => sum + Number(b.amount || 0), 0) || 0,
-      totalSpent: purchases?.reduce((sum, p) => sum + Number(p.amount || 0), 0) || 0,
-      licenseCount: licenses?.length || 0,
-      expiringLicenses: licenses?.filter(l => {
-        if (!l.expiration_date) return false
-        const diff = new Date(l.expiration_date) - now
-        return diff > 0 && diff <= thirtyDays
-      }) || [],
-      warrantyAlerts: assets?.filter(a => {
-        if (!a.warranty_expiry) return false
-        const diff = new Date(a.warranty_expiry) - now
-        return diff > 0 && diff <= thirtyDays
-      }) || [],
-      subscriptionCost: subscriptions?.reduce((sum, s) => sum + Number(s.monthly_cost || 0), 0) || 0,
-      recentActivity: activity || [],
-    })
-    setLoading(false)
-  }
-
-  const budgetUsed = stats.totalBudget > 0
-    ? (stats.totalSpent / stats.totalBudget) * 100
-    : 0
-
-  function formatCurrency(n) {
-    return '$' + Number(n || 0).toLocaleString('en-US', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })
-  }
-
-  function formatDate(d) {
-    if (!d) return '—'
-    return new Date(d).toLocaleDateString('en-US', {
-      month: 'short', day: 'numeric', year: 'numeric',
-    })
-  }
-
-  if (loading) {
-    return (
-      <div style={{
-        maxWidth: '1100px',
-        margin: '0 auto',
-        padding: '60px 24px',
-        textAlign: 'center',
-        color: '#5a6e84',
-      }}>
-        Loading dashboard...
-      </div>
-    )
-  }
+export default function HomePage() {
+  const tools = [
+    {
+      name: 'IT Asset & Budget Tracker',
+      description: 'Track hardware, software licenses, budgets, and purchases. Manage the full lifecycle of IT assets with photo uploads, depreciation, and audit logging.',
+      href: '/tracker',
+      icon: '⊞',
+      color: '#2563eb',
+      status: 'Active',
+    },
+    {
+      name: 'Knowledge Base',
+      description: 'Create and organize internal documentation, guides, and company knowledge for your team.',
+      href: '/wiki',
+      icon: '⊡',
+      color: '#7c3aed',
+      status: 'Coming Soon',
+    },
+  ]
 
   return (
     <div style={{
-      maxWidth: '1100px',
+      maxWidth: '900px',
       margin: '0 auto',
-      padding: '28px 24px 60px',
+      padding: '60px 24px',
     }}>
-      <h1 style={{
-        fontSize: '22px',
-        fontWeight: '700',
-        color: '#e0e7f0',
-        marginBottom: '24px',
-      }}>
-        Dashboard
-      </h1>
-
-      {/* Stat Cards */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-        gap: '14px',
-        marginBottom: '24px',
-      }}>
-        {[
-          {
-            label: 'Total Assets',
-            value: stats.totalAssets,
-            color: '#60a5fa',
-            sub: `${stats.deployed} deployed`,
-          },
-          {
-            label: 'Active Licenses',
-            value: stats.licenseCount,
-            color: '#a78bfa',
-            sub: `${stats.expiringLicenses.length} expiring soon`,
-          },
-          {
-            label: 'Budget Remaining',
-            value: formatCurrency(stats.totalBudget - stats.totalSpent),
-            color: budgetUsed > 90 ? '#f87171' : '#4ade80',
-            sub: `${budgetUsed.toFixed(0)}% used`,
-          },
-          {
-            label: 'Monthly Subscriptions',
-            value: formatCurrency(stats.subscriptionCost),
-            color: '#fbbf24',
-            sub: `${formatCurrency(stats.subscriptionCost * 12)}/yr`,
-          },
-        ].map((card, i) => (
-          <div key={i} style={{
-            backgroundColor: '#0f1620',
-            border: '1px solid #182030',
-            borderRadius: '14px',
-            padding: '22px',
-          }}>
-            <div style={{
-              fontSize: '11px',
-              fontWeight: '600',
-              color: '#4a5a6e',
-              textTransform: 'uppercase',
-              letterSpacing: '1px',
-              marginBottom: '10px',
-            }}>
-              {card.label}
-            </div>
-            <div style={{
-              fontSize: '28px',
-              fontWeight: '800',
-              color: card.color,
-              lineHeight: 1,
-            }}>
-              {card.value}
-            </div>
-            <div style={{
-              fontSize: '12px',
-              color: '#4a5a6e',
-              marginTop: '6px',
-            }}>
-              {card.sub}
-            </div>
-          </div>
-        ))}
+      {/* Header */}
+      <div style={{ marginBottom: '48px' }}>
+        <h1 style={{
+          fontSize: '32px',
+          fontWeight: '800',
+          color: '#e0e7f0',
+          margin: '0 0 8px',
+        }}>
+          Welcome to PRS Apps
+        </h1>
+        <p style={{
+          fontSize: '15px',
+          color: '#5a6e84',
+          margin: 0,
+          lineHeight: '1.6',
+        }}>
+          Your company tools, all in one place. Choose an app below to get started.
+        </p>
       </div>
 
-      {/* Budget Bar */}
-      {stats.totalBudget > 0 && (
-        <div style={{
-          backgroundColor: '#0f1620',
-          border: '1px solid #182030',
-          borderRadius: '14px',
-          padding: '22px',
-          marginBottom: '24px',
-        }}>
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            marginBottom: '10px',
-          }}>
-            <span style={{ fontSize: '13px', fontWeight: '600', color: '#8aa0b8' }}>
-              Overall IT Budget
-            </span>
-            <span style={{ fontSize: '12px', color: '#5a6e84' }}>
-              {formatCurrency(stats.totalSpent)} / {formatCurrency(stats.totalBudget)}
-            </span>
-          </div>
-          <div style={{
-            height: '10px',
-            borderRadius: '5px',
-            backgroundColor: '#131a24',
-            overflow: 'hidden',
-          }}>
-            <div style={{
-              height: '100%',
-              borderRadius: '5px',
-              width: `${Math.min(budgetUsed, 100)}%`,
-              backgroundColor: budgetUsed > 90 ? '#ef4444' : budgetUsed > 70 ? '#f59e0b' : '#22c55e',
-              transition: 'width 0.8s ease',
-            }} />
-          </div>
-        </div>
-      )}
-
-      {/* Alerts and Recent Activity side by side */}
+      {/* App Cards */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
-        gap: '14px',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+        gap: '20px',
       }}>
-        {/* Alerts */}
-        <div style={{
-          backgroundColor: '#0f1620',
-          border: '1px solid #182030',
-          borderRadius: '14px',
-          padding: '22px',
-        }}>
-          <div style={{
-            fontSize: '13px',
-            fontWeight: '700',
-            color: '#e0e7f0',
-            marginBottom: '14px',
-          }}>
-            Alerts
-          </div>
-          {stats.expiringLicenses.length === 0 && stats.warrantyAlerts.length === 0 ? (
-            <div style={{ fontSize: '13px', color: '#3a4a5e', padding: '12px 0' }}>
-              No active alerts — everything looks good.
-            </div>
-          ) : (
-            <>
-              {stats.expiringLicenses.map((l) => (
-                <div key={l.id} style={{
-                  padding: '8px 0',
-                  borderBottom: '1px solid #141d28',
-                  fontSize: '13px',
-                  color: '#c0cad8',
-                }}>
-                  <span style={{ color: '#fbbf24' }}>⊟ </span>
-                  License <strong>{l.name}</strong> expires {formatDate(l.expiration_date)}
-                </div>
-              ))}
-              {stats.warrantyAlerts.map((a) => (
-                <div key={a.id} style={{
-                  padding: '8px 0',
-                  borderBottom: '1px solid #141d28',
-                  fontSize: '13px',
-                  color: '#c0cad8',
-                }}>
-                  <span style={{ color: '#fb923c' }}>⊞ </span>
-                  Warranty for <strong>{a.name}</strong> expires {formatDate(a.warranty_expiry)}
-                </div>
-              ))}
-            </>
-          )}
-        </div>
+        {tools.map(tool => {
+          const isActive = tool.status === 'Active'
 
-        {/* Recent Activity */}
-        <div style={{
-          backgroundColor: '#0f1620',
-          border: '1px solid #182030',
-          borderRadius: '14px',
-          padding: '22px',
-        }}>
-          <div style={{
-            fontSize: '13px',
-            fontWeight: '700',
-            color: '#e0e7f0',
-            marginBottom: '14px',
-          }}>
-            Recent Activity
-          </div>
-          {stats.recentActivity.length === 0 ? (
-            <div style={{ fontSize: '13px', color: '#3a4a5e', padding: '12px 0' }}>
-              No activity yet. Start by adding assets or setting a budget.
-            </div>
+          return isActive ? (
+            <Link
+              key={tool.name}
+              href={tool.href}
+              style={{ textDecoration: 'none' }}
+            >
+              <div
+                style={{
+                  backgroundColor: '#0f1620',
+                  border: '1px solid #182030',
+                  borderRadius: '16px',
+                  padding: '28px',
+                  cursor: 'pointer',
+                  transition: 'border-color 0.2s, transform 0.2s',
+                  height: '100%',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = tool.color
+                  e.currentTarget.style.transform = 'translateY(-2px)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = '#182030'
+                  e.currentTarget.style.transform = 'translateY(0)'
+                }}
+              >
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: '16px',
+                }}>
+                  <div style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '12px',
+                    backgroundColor: tool.color + '18',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '22px',
+                    color: tool.color,
+                    border: `1px solid ${tool.color}33`,
+                  }}>
+                    {tool.icon}
+                  </div>
+                  <span style={{
+                    padding: '4px 12px',
+                    borderRadius: '100px',
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    backgroundColor: '#0d3320',
+                    color: '#4ade80',
+                    border: '1px solid #166534',
+                  }}>
+                    {tool.status}
+                  </span>
+                </div>
+
+                <h2 style={{
+                  fontSize: '17px',
+                  fontWeight: '700',
+                  color: '#e0e7f0',
+                  margin: '0 0 8px',
+                }}>
+                  {tool.name}
+                </h2>
+                <p style={{
+                  fontSize: '13.5px',
+                  color: '#5a6e84',
+                  margin: 0,
+                  lineHeight: '1.6',
+                }}>
+                  {tool.description}
+                </p>
+              </div>
+            </Link>
           ) : (
-            stats.recentActivity.map((h, i) => (
-              <div key={i} style={{
-                padding: '7px 0',
-                borderBottom: '1px solid #141d28',
-                fontSize: '12px',
+            <div
+              key={tool.name}
+              style={{
+                backgroundColor: '#0f1620',
+                border: '1px solid #182030',
+                borderRadius: '16px',
+                padding: '28px',
+                opacity: 0.6,
+                height: '100%',
+              }}
+            >
+              <div style={{
                 display: 'flex',
+                alignItems: 'center',
                 justifyContent: 'space-between',
-                gap: '8px',
+                marginBottom: '16px',
               }}>
-                <span style={{ color: '#8aa0b8' }}>{h.detail}</span>
-                <span style={{ color: '#3a4a5e', fontSize: '11px', flexShrink: 0 }}>
-                  {formatDate(h.created_at)}
+                <div style={{
+                  width: '48px',
+                  height: '48px',
+                  borderRadius: '12px',
+                  backgroundColor: '#131a24',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '22px',
+                  color: '#4a5a6e',
+                }}>
+                  {tool.icon}
+                </div>
+                <span style={{
+                  padding: '4px 12px',
+                  borderRadius: '100px',
+                  fontSize: '11px',
+                  fontWeight: '600',
+                  backgroundColor: '#1a1a2e',
+                  color: '#a78bfa',
+                  border: '1px solid #5b21b6',
+                }}>
+                  {tool.status}
                 </span>
               </div>
-            ))
-          )}
-        </div>
+
+              <h2 style={{
+                fontSize: '17px',
+                fontWeight: '700',
+                color: '#8aa0b8',
+                margin: '0 0 8px',
+              }}>
+                {tool.name}
+              </h2>
+              <p style={{
+                fontSize: '13.5px',
+                color: '#3a4a5e',
+                margin: 0,
+                lineHeight: '1.6',
+              }}>
+                {tool.description}
+              </p>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Footer hint */}
+      <div style={{
+        marginTop: '48px',
+        textAlign: 'center',
+        fontSize: '13px',
+        color: '#3a4a5e',
+      }}>
+        More tools coming soon. Reach out to your admin to request new features.
       </div>
     </div>
   )

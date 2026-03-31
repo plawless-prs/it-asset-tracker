@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createClient } from '../../lib/supabase'
-import AssetModal from '../../components/AssetModal'
-import AssetDetail from '../../components/AssetDetail'
+import { createClient } from '../../../lib/supabase'
+import AssetModal from '../../../components/AssetModal'
+import AssetDetail from '../../../components/AssetDetail'
 
 export default function AssetsPage() {
   const supabase = createClient()

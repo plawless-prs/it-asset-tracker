@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createClient } from '../../lib/supabase'
-import LicenseModal from '../../components/LicenseModal'
+import { createClient } from '../../../lib/supabase'
+import LicenseModal from '../../../components/LicenseModal'
 
 export default function LicensesPage() {
   const supabase = createClient()

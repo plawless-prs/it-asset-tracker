@@ -2,8 +2,8 @@ import './globals.css'
 import NavigationWrapper from '../components/navigationwrapper'
 
 export const metadata = {
-  title: 'AssetTrack - IT Asset & Budget Tracker',
-  description: 'Track IT assets, software licenses, and budgets',
+  title: 'PRS Apps',
+  description: 'PRS company tools and applications',
 }
 
 export default function RootLayout({ children }) {

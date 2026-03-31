@@ -1,10 +1,10 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createClient } from '../../lib/supabase'
-import BudgetModal from '../../components/BudgetModal'
-import PurchaseModal from '../../components/PurchaseModal'
-import SubscriptionModal from '../../components/SubscriptionModal'
+import { createClient } from '../../../lib/supabase'
+import BudgetModal from '../../../components/BudgetModal'
+import PurchaseModal from '../../../components/PurchaseModal'
+import SubscriptionModal from '../../../components/SubscriptionModal'
 
 export default function BudgetPage() {
   const supabase = createClient()
