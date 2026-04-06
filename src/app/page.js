@@ -13,6 +13,14 @@ export default function HomePage() {
       status: 'Active',
     },
     {
+      name: 'Invoice Processor',
+      description: 'Upload PDF invoices to automatically extract totals, apply a 5% discount, and export updated PDFs and Excel reports.',
+      href: '/invoices',
+      icon: '⊡',
+      color: '#059669',
+      status: 'Active',
+    },
+    {
       name: 'Knowledge Base',
       description: 'Create and organize internal documentation, guides, and company knowledge for your team.',
       href: '/wiki',

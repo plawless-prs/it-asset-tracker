@@ -33,6 +33,16 @@ export default function Navigation() {
         { href: '/tracker/history', label: 'History' },
       ],
     },
+     
+    {
+      id: 'invoices',
+      label: 'Invoice Processor',
+      icon: '⊡',
+      basePath: '/invoices',
+      links: [
+        { href: '/invoices', label: 'Process Invoices' },
+      ],
+    },
     {
       id: 'wiki',
       label: 'Knowledge Base',
