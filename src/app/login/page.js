@@ -7,7 +7,6 @@ import { useRouter } from 'next/navigation'
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [isSignUp, setIsSignUp] = useState(false)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const router = useRouter()
@@ -18,29 +17,16 @@ export default function LoginPage() {
     setLoading(true)
     setMessage('')
 
-    if (isSignUp) {
-      // Create a new account
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-      })
-      if (error) {
-        setMessage(error.message)
-      } else {
-        setMessage('Account created! Check your email for a confirmation link, or sign in if email confirmation is disabled.')
-      }
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+
+    if (error) {
+      setMessage(error.message)
     } else {
-      // Sign in to existing account
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      })
-      if (error) {
-        setMessage(error.message)
-      } else {
-        router.push('/')
-        router.refresh()
-      }
+      router.push('/')
+      router.refresh()
     }
 
     setLoading(false)
@@ -63,7 +49,6 @@ export default function LoginPage() {
         borderRadius: '16px',
         border: '1px solid #1e2d40',
       }}>
-        {/* Logo / Title */}
         <div style={{ textAlign: 'center', marginBottom: '32px' }}>
           <div style={{
             width: '48px',
@@ -74,11 +59,12 @@ export default function LoginPage() {
             alignItems: 'center',
             justifyContent: 'center',
             margin: '0 auto 16px',
-            fontSize: '20px',
+            fontSize: '16px',
             fontWeight: '800',
             color: '#fff',
+            letterSpacing: '-0.5px',
           }}>
-            IT
+            PRS
           </div>
           <h1 style={{
             fontSize: '22px',
@@ -86,18 +72,17 @@ export default function LoginPage() {
             color: '#e0e7f0',
             margin: '0 0 4px',
           }}>
-            AssetTrack
+            PRS Apps
           </h1>
           <p style={{
             fontSize: '14px',
             color: '#5a6e84',
             margin: 0,
           }}>
-            {isSignUp ? 'Create your account' : 'Sign in to your account'}
+            Sign in to your account
           </p>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '16px' }}>
             <label style={{
@@ -164,16 +149,15 @@ export default function LoginPage() {
             />
           </div>
 
-          {/* Error/Success Message */}
           {message && (
             <div style={{
               padding: '10px 14px',
               borderRadius: '8px',
               marginBottom: '16px',
               fontSize: '13px',
-              backgroundColor: message.includes('Account created') ? '#0d3320' : '#330d0d',
-              color: message.includes('Account created') ? '#4ade80' : '#f87171',
-              border: `1px solid ${message.includes('Account created') ? '#166534' : '#991b1b'}`,
+              backgroundColor: '#330d0d',
+              color: '#f87171',
+              border: '1px solid #991b1b',
             }}>
               {message}
             </div>
@@ -192,35 +176,19 @@ export default function LoginPage() {
               fontSize: '14px',
               fontWeight: '600',
               cursor: loading ? 'not-allowed' : 'pointer',
-              marginBottom: '16px',
             }}
           >
-            {loading ? 'Please wait...' : (isSignUp ? 'Create Account' : 'Sign In')}
+            {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
 
-        {/* Toggle sign in / sign up */}
         <p style={{
           textAlign: 'center',
-          fontSize: '13px',
-          color: '#5a6e84',
-          margin: 0,
+          fontSize: '12px',
+          color: '#3a4a5e',
+          marginTop: '20px',
         }}>
-          {isSignUp ? 'Already have an account? ' : "Don't have an account? "}
-          <button
-            onClick={() => { setIsSignUp(!isSignUp); setMessage(''); }}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#60a5fa',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: '600',
-              padding: 0,
-            }}
-          >
-            {isSignUp ? 'Sign In' : 'Sign Up'}
-          </button>
+          Contact your administrator for account access
         </p>
       </div>
     </div>

@@ -4,12 +4,14 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { createClient } from '../lib/supabase'
+import { useRole } from '../lib/useRole'
 
 export default function Navigation() {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
   const [openDropdown, setOpenDropdown] = useState(null)
+  const { isAdmin } = useRole()
 
   async function handleSignOut() {
     await supabase.auth.signOut()
@@ -176,6 +178,27 @@ export default function Navigation() {
               </div>
             )
           })}
+          {/* Admin link — only visible to admins */}
+          {isAdmin && (
+            <Link
+              href="/admin"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                borderRadius: '8px',
+                fontSize: '13px',
+                fontWeight: '500',
+                color: pathname === '/admin' ? '#f87171' : '#5a6e84',
+                backgroundColor: pathname === '/admin' ? '#1a0d0d' : 'transparent',
+                border: pathname === '/admin' ? '1px solid #991b1b' : '1px solid transparent',
+                textDecoration: 'none',
+              }}
+            >
+              Admin
+            </Link>
+          )}
 
           {/* Sign Out */}
           <button
