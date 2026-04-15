@@ -150,6 +150,16 @@ function detectTotalsFromText(text) {
 // ─── PDF parser helper (creates parser once, reuse for text + coords) ─────────
 
 async function createParser(buffer) {
+  // Disable pdfjs worker before pdf-parse initializes it
+  try {
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+    if (pdfjs.GlobalWorkerOptions) {
+      pdfjs.GlobalWorkerOptions.workerSrc = 'data:,'
+    }
+  } catch (e) {
+    // If pdfjs-dist isn't directly importable, that's fine
+  }
+
   const { PDFParse } = await import('pdf-parse')
   const parser = new PDFParse(new Uint8Array(buffer))
   await parser.load()
