@@ -1,3 +1,35 @@
+// Polyfill DOMMatrix for Node.js serverless environments (Vercel)
+if (typeof globalThis.DOMMatrix === 'undefined') {
+  globalThis.DOMMatrix = class DOMMatrix {
+    constructor(init) {
+      if (Array.isArray(init)) {
+        this.a = init[0] ?? 1; this.b = init[1] ?? 0;
+        this.c = init[2] ?? 0; this.d = init[3] ?? 1;
+        this.e = init[4] ?? 0; this.f = init[5] ?? 0;
+      } else {
+        this.a = 1; this.b = 0; this.c = 0;
+        this.d = 1; this.e = 0; this.f = 0;
+      }
+      this.m11 = this.a; this.m12 = this.b;
+      this.m21 = this.c; this.m22 = this.d;
+      this.m41 = this.e; this.m42 = this.f;
+      this.is2D = true; this.isIdentity = this.a === 1 && this.b === 0 && this.c === 0 && this.d === 1 && this.e === 0 && this.f === 0;
+    }
+    inverse() { return new DOMMatrix([1, 0, 0, 1, 0, 0]); }
+    multiply() { return new DOMMatrix([this.a, this.b, this.c, this.d, this.e, this.f]); }
+    scale() { return new DOMMatrix([this.a, this.b, this.c, this.d, this.e, this.f]); }
+    translate() { return new DOMMatrix([this.a, this.b, this.c, this.d, this.e, this.f]); }
+    transformPoint(p) { return { x: p?.x ?? 0, y: p?.y ?? 0 }; }
+  }
+}
+
+if (typeof globalThis.Path2D === 'undefined') {
+  globalThis.Path2D = class Path2D {
+    constructor() {}
+    moveTo() {}; lineTo() {}; closePath() {}; rect() {};
+    arc() {}; arcTo() {}; bezierCurveTo() {}; quadraticCurveTo() {}
+  }
+}
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 
 const DISCOUNT_RATE = 0.05
