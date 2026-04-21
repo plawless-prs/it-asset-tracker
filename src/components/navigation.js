@@ -44,6 +44,15 @@ export default function Navigation() {
       ],
     },
     {
+      id: 'calculator',
+      label: 'Material Calculator',
+      icon: '⊞',
+      basePath: '/calculator',
+      links: [
+        { href: '/calculator', label: 'Calculator' },
+      ],
+    },
+    {
       id: 'wiki',
       label: 'Knowledge Base',
       icon: '⊡',

@@ -21,6 +21,14 @@ export default function HomePage() {
       status: 'Active',
     },
     {
+      name: 'Material Calculator',
+      description: 'Calculate material costs for rolls, sheets, slitting, and gaskets. Track cuts, parts, remnants, and pricing with markup.',
+      href: '/calculator',
+      icon: '⊞',
+      color: '#2563eb',
+      status: 'Active',
+    },
+    {
       name: 'Knowledge Base',
       description: 'Create and organize internal documentation, guides, and company knowledge for your team.',
       href: '/wiki',
