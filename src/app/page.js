@@ -1,11 +1,14 @@
 'use client'
 
 import Link from 'next/link'
+import {useRole} from '../lib/useRole'
 
 export default function HomePage() {
+  const { hasAccess } = useRole()
   const tools = [
     {
       name: 'IT Asset & Budget Tracker',
+      appId: 'tracker',
       description: 'Track hardware, software licenses, budgets, and purchases. Manage the full lifecycle of IT assets with photo uploads, depreciation, and audit logging.',
       href: '/tracker',
       icon: '⊞',
@@ -14,6 +17,7 @@ export default function HomePage() {
     },
     {
       name: 'Invoice Processor',
+      appId: 'invoices',
       description: 'Upload PDF invoices to automatically extract totals, apply a 5% discount, and export updated PDFs and Excel reports.',
       href: '/invoices',
       icon: '⊡',
@@ -22,6 +26,7 @@ export default function HomePage() {
     },
     {
       name: 'Material Calculator',
+      appId: 'calculator',
       description: 'Calculate material costs for rolls, sheets, slitting, and gaskets. Track cuts, parts, remnants, and pricing with markup.',
       href: '/calculator',
       icon: '⊞',
@@ -30,6 +35,7 @@ export default function HomePage() {
     },
     {
       name: 'Knowledge Base',
+      appId: 'wiki',
       description: 'Create and organize internal documentation, guides, and company knowledge for your team.',
       href: '/wiki',
       icon: '⊡',
@@ -37,6 +43,7 @@ export default function HomePage() {
       status: 'Coming Soon',
     },
   ]
+  const visibleTools = tools.filter(t => hasAccess(t.appId))
 
   return (
     <div style={{
@@ -70,7 +77,7 @@ export default function HomePage() {
         gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
         gap: '20px',
       }}>
-        {tools.map(tool => {
+        {visibleTools.map(tool => {
           const isActive = tool.status === 'Active'
 
           return isActive ? (

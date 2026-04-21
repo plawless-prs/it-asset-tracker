@@ -1,9 +1,23 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+
+import { useRouter } from 'next/navigation'
+import { useRole } from '../../lib/useRole'
+  
 import { createClient } from '../../lib/supabase'
 
 export default function DashboardPage() {
+  // Inside the component
+  const router = useRouter()
+  const { hasAccess, loading: roleLoading } = useRole()
+
+  useEffect(() => {
+    if (!roleLoading && !hasAccess('tracker')) {
+      router.push('/')
+    }
+  }, [roleLoading, hasAccess])
+
   const supabase = createClient()
   const [stats, setStats] = useState({
     totalAssets: 0,

@@ -1,7 +1,11 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 
+// Add these imports at the top of the file
+import { useRouter } from 'next/navigation'
+import { useRole } from '../../lib/useRole'
+ 
 const DISCOUNT_RATE = 0.05
 
 function formatCurrency(val) {
@@ -268,6 +272,16 @@ function InvoiceRow({ invoice, sessionId, index, onUpdate, onPreview }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function InvoiceProcessorPage() {
+   // Add inside the component, before other logic
+  const router = useRouter()
+  const { hasAccess, loading: roleLoading } = useRole()
+
+  useEffect(() => {
+    if (!roleLoading && !hasAccess('invoices')) {
+      router.push('/')
+    }
+  }, [roleLoading, hasAccess])
+
   const fileInputRef = useRef(null)
   const [dragging, setDragging] = useState(false)
   const [processing, setProcessing] = useState(false)

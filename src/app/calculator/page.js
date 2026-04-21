@@ -1,6 +1,10 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
+
+import { useRouter } from 'next/navigation'
+import { useRole } from '../../lib/useRole'
+  
 import { createBrowserClient } from '@supabase/ssr'
 
 // ============================================================
@@ -862,6 +866,16 @@ function History({ items, onClear, onDelete, onView, onEdit, onDuplicate }) {
 // APP — Main page with Supabase storage
 // ============================================================
 export default function MaterialCalculatorPage() {
+  // Inside the component
+  const router = useRouter()
+  const { hasAccess, loading: roleLoading } = useRole()
+
+  useEffect(() => {
+    if (!roleLoading && !hasAccess('calculator')) {
+      router.push('/')
+    }
+  }, [roleLoading, hasAccess])
+
   const [tab, setTab] = useState("roll");
   const [history, setHistory] = useState([]);
   const [loaded, setLoaded] = useState(false);

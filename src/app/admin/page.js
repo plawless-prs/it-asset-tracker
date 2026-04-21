@@ -28,7 +28,7 @@ export default function AdminPage() {
   async function loadUsers() {
     const { data } = await supabase
       .from('profiles')
-      .select('*')
+      .select('id, email, full_name, role, department, created_at, app_access')
       .order('created_at', { ascending: true })
 
     if (data) setUsers(data)
@@ -38,9 +38,6 @@ export default function AdminPage() {
   async function handleCreateUser(formData) {
     setMessage('')
 
-    // Use Supabase admin API to create user via Edge Function
-    // Since we can't use the admin API from the client, we'll use signUp
-    // but immediately sign back in as the admin
     const { data: currentSession } = await supabase.auth.getSession()
 
     const { data, error } = await supabase.auth.signUp({
@@ -54,16 +51,15 @@ export default function AdminPage() {
     }
 
     if (data.user) {
-      // Create their profile
       await supabase.from('profiles').upsert({
         id: data.user.id,
         email: formData.email,
         full_name: formData.full_name,
         role: formData.role,
         department: formData.department,
+        app_access: formData.app_access,
       })
 
-      // Log the action
       const { data: { user: adminUser } } = await supabase.auth.getUser()
       await supabase.from('audit_log').insert({
         action: 'created',
@@ -73,7 +69,6 @@ export default function AdminPage() {
       })
     }
 
-    // Sign back in as admin (creating a user signs you in as them)
     if (currentSession?.session) {
       await supabase.auth.signInWithPassword({
         email: prompt('Re-enter YOUR admin email to stay logged in:'),
@@ -109,6 +104,31 @@ export default function AdminPage() {
     loadUsers()
   }
 
+  async function handleUpdateAppAccess(userId, newAccess, userName) {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ app_access: newAccess })
+      .eq('id', userId)
+
+    if (error) {
+      alert(error.message)
+      return
+    }
+
+    // Update local state immediately
+    setUsers(prev => prev.map(u =>
+      u.id === userId ? { ...u, app_access: newAccess } : u
+    ))
+
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase.from('audit_log').insert({
+      action: 'updated',
+      entity_type: 'user',
+      detail: `User "${userName}" app access updated to: ${newAccess.join(', ')}`,
+      user_id: user?.id,
+    })
+  }
+
   async function handleDeleteUser(profile) {
     if (profile.role === 'admin') {
       const adminCount = users.filter(u => u.role === 'admin').length
@@ -138,6 +158,7 @@ export default function AdminPage() {
 
     loadUsers()
   }
+
   async function handleEditUser(userId, formData) {
     const { error } = await supabase
       .from('profiles')
@@ -171,6 +192,12 @@ export default function AdminPage() {
     viewer: { bg: '#1a1a1a', text: '#737373', border: '#404040' },
   }
 
+  const allApps = [
+    { id: 'tracker', label: 'IT Tracker' },
+    { id: 'invoices', label: 'Invoice Processor' },
+    { id: 'calculator', label: 'Material Calculator' },
+  ]
+
   if (roleLoading || (!isAdmin && !roleLoading)) {
     return (
       <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '60px 24px', textAlign: 'center', color: '#5a6e84' }}>
@@ -195,7 +222,7 @@ export default function AdminPage() {
             User Management
           </h1>
           <p style={{ fontSize: '13px', color: '#5a6e84', margin: 0 }}>
-            Create accounts and manage roles for your team
+            Create accounts, manage roles, and control app access for your team
           </p>
         </div>
         <button
@@ -272,114 +299,154 @@ export default function AdminPage() {
       {loading ? (
         <div style={{ textAlign: 'center', padding: '48px', color: '#5a6e84' }}>Loading users...</div>
       ) : (
-        <div style={{
-          backgroundColor: '#0f1620',
-          border: '1px solid #182030',
-          borderRadius: '14px',
-          overflow: 'hidden',
-        }}>
-          {/* Table header */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 150px 150px 120px 100px',
-            padding: '10px 18px',
-            fontSize: '11px',
-            fontWeight: '600',
-            color: '#4a5a6e',
-            textTransform: 'uppercase',
-            letterSpacing: '0.8px',
-            borderBottom: '1px solid #182030',
-            backgroundColor: '#0c1118',
-          }}>
-            <span>User</span>
-            <span>Department</span>
-            <span>Role</span>
-            <span>Joined</span>
-            <span></span>
-          </div>
-
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {users.map(profile => {
             const rc = roleColors[profile.role] || roleColors.viewer
             const adminCount = users.filter(u => u.role === 'admin').length
             const isLastAdmin = profile.role === 'admin' && adminCount <= 1
+            const userAccess = profile.app_access || ['tracker', 'invoices', 'calculator']
 
             return (
               <div key={profile.id} style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 150px 150px 120px 100px',
-                padding: '14px 18px',
-                alignItems: 'center',
-                borderBottom: '1px solid #141d28',
-                fontSize: '13px',
+                backgroundColor: '#0f1620',
+                border: '1px solid #182030',
+                borderRadius: '14px',
+                padding: '18px',
               }}>
-                <div>
-                  <div
-                    style={{ fontWeight: '600', color: '#d0d8e4', cursor: 'pointer' }}
-                    onClick={() => setEditingUser(profile)}
-                  >
-                    {profile.full_name || 'No name set'}
-                    <span style={{ fontSize: '10px', color: '#3a4a5e', marginLeft: '6px' }}>✎</span>
-                  </div>
-                  <div style={{ fontSize: '11.5px', color: '#4a5a6e' }}>
-                    {profile.email || profile.id.slice(0, 8) + '...'}
-                  </div>
-                </div>
-
-                <span style={{ color: '#6a7e94' }}>{profile.department || '—'}</span>
-
-                <div>
-                  <select
-                    value={profile.role || 'viewer'}
-                    onChange={(e) => handleUpdateRole(profile.id, e.target.value, profile.email || profile.full_name)}
-                    disabled={isLastAdmin}
-                    style={{
-                      padding: '4px 8px',
-                      backgroundColor: rc.bg,
-                      color: rc.text,
-                      border: `1px solid ${rc.border}`,
-                      borderRadius: '6px',
-                      fontSize: '12px',
-                      fontWeight: '600',
-                      cursor: isLastAdmin ? 'not-allowed' : 'pointer',
-                      outline: 'none',
-                      opacity: isLastAdmin ? 0.6 : 1,
-                    }}
-                  >
-                    <option value="admin">admin</option>
-                    <option value="manager">manager</option>
-                    <option value="editor">editor</option>
-                    <option value="viewer">viewer</option>
-                  </select>
-                  {isLastAdmin && (
-                    <div style={{ fontSize: '10px', color: '#854d0e', marginTop: '2px' }}>
-                      Last admin
+                {/* Top row: user info, role, actions */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 150px 150px 120px 100px',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}>
+                  <div>
+                    <div
+                      style={{ fontWeight: '600', color: '#d0d8e4', cursor: 'pointer', fontSize: '14px' }}
+                      onClick={() => setEditingUser(profile)}
+                    >
+                      {profile.full_name || 'No name set'}
+                      <span style={{ fontSize: '10px', color: '#3a4a5e', marginLeft: '6px' }}>✎</span>
                     </div>
-                  )}
-                </div>
+                    <div style={{ fontSize: '11.5px', color: '#4a5a6e' }}>
+                      {profile.email || profile.id.slice(0, 8) + '...'}
+                    </div>
+                  </div>
 
-                <span style={{ fontSize: '12px', color: '#4a5a6e' }}>
-                  {profile.created_at
-                    ? new Date(profile.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                    : '—'}
-                </span>
+                  <span style={{ color: '#6a7e94', fontSize: '13px' }}>{profile.department || '—'}</span>
 
-                <div>
-                  {!isLastAdmin && (
-                    <button
-                      onClick={() => handleDeleteUser(profile)}
+                  <div>
+                    <select
+                      value={profile.role || 'viewer'}
+                      onChange={(e) => handleUpdateRole(profile.id, e.target.value, profile.email || profile.full_name)}
+                      disabled={isLastAdmin}
                       style={{
-                        padding: '4px 12px',
+                        padding: '4px 8px',
+                        backgroundColor: rc.bg,
+                        color: rc.text,
+                        border: `1px solid ${rc.border}`,
                         borderRadius: '6px',
-                        fontSize: '11px',
-                        fontWeight: '500',
-                        backgroundColor: '#7f1d1d',
-                        color: '#fca5a5',
-                        border: 'none',
-                        cursor: 'pointer',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        cursor: isLastAdmin ? 'not-allowed' : 'pointer',
+                        outline: 'none',
+                        opacity: isLastAdmin ? 0.6 : 1,
                       }}
                     >
-                      Delete
-                    </button>
+                      <option value="admin">admin</option>
+                      <option value="manager">manager</option>
+                      <option value="editor">editor</option>
+                      <option value="viewer">viewer</option>
+                    </select>
+                    {isLastAdmin && (
+                      <div style={{ fontSize: '10px', color: '#854d0e', marginTop: '2px' }}>
+                        Last admin
+                      </div>
+                    )}
+                  </div>
+
+                  <span style={{ fontSize: '12px', color: '#4a5a6e' }}>
+                    {profile.created_at
+                      ? new Date(profile.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                      : '—'}
+                  </span>
+
+                  <div>
+                    {!isLastAdmin && (
+                      <button
+                        onClick={() => handleDeleteUser(profile)}
+                        style={{
+                          padding: '4px 12px',
+                          borderRadius: '6px',
+                          fontSize: '11px',
+                          fontWeight: '500',
+                          backgroundColor: '#7f1d1d',
+                          color: '#fca5a5',
+                          border: 'none',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* App Access Permissions */}
+                <div style={{
+                  marginTop: '14px',
+                  paddingTop: '14px',
+                  borderTop: '1px solid #182030',
+                }}>
+                  <div style={{
+                    fontSize: '11px',
+                    color: '#5a6e84',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.1em',
+                    marginBottom: '8px',
+                    fontWeight: '600',
+                  }}>
+                    App Access
+                  </div>
+                  <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                    {allApps.map(app => {
+                      const hasApp = userAccess.includes(app.id)
+                      const isAdminUser = profile.role === 'admin'
+                      return (
+                        <label key={app.id} style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          cursor: isAdminUser ? 'not-allowed' : 'pointer',
+                          opacity: isAdminUser ? 0.5 : 1,
+                          fontSize: '13px',
+                          color: hasApp ? '#c0cad8' : '#4a5a6e',
+                        }}>
+                          <input
+                            type="checkbox"
+                            checked={isAdminUser ? true : hasApp}
+                            disabled={isAdminUser}
+                            onChange={(e) => {
+                              const newAccess = e.target.checked
+                                ? [...userAccess, app.id]
+                                : userAccess.filter(a => a !== app.id)
+                              handleUpdateAppAccess(
+                                profile.id,
+                                newAccess,
+                                profile.email || profile.full_name
+                              )
+                            }}
+                            style={{ accentColor: '#2563eb', width: '16px', height: '16px' }}
+                          />
+                          {app.label}
+                        </label>
+                      )
+                    })}
+                  </div>
+                  {profile.role === 'admin' && (
+                    <div style={{ fontSize: '11px', color: '#4a5a6e', marginTop: '4px' }}>
+                      Admins always have access to all apps
+                    </div>
                   )}
                 </div>
               </div>
@@ -393,6 +460,7 @@ export default function AdminPage() {
         <CreateUserModal
           onSave={handleCreateUser}
           onClose={() => setShowCreateModal(false)}
+          allApps={allApps}
         />
       )}
       {/* Edit User Modal */}
@@ -407,18 +475,29 @@ export default function AdminPage() {
   )
 }
 
-function CreateUserModal({ onSave, onClose }) {
+function CreateUserModal({ onSave, onClose, allApps }) {
   const [form, setForm] = useState({
     email: '',
     password: '',
     full_name: '',
     role: 'viewer',
     department: '',
+    app_access: ['tracker', 'invoices', 'calculator'],
   })
   const [saving, setSaving] = useState(false)
 
   function set(key, value) {
     setForm(prev => ({ ...prev, [key]: value }))
+  }
+
+  function toggleApp(appId) {
+    setForm(prev => {
+      const current = prev.app_access || []
+      const newAccess = current.includes(appId)
+        ? current.filter(a => a !== appId)
+        : [...current, appId]
+      return { ...prev, app_access: newAccess }
+    })
   }
 
   async function handleSubmit() {
@@ -487,7 +566,7 @@ function CreateUserModal({ onSave, onClose }) {
           </div>
         </div>
 
-        <div style={{ marginBottom: '20px' }}>
+        <div style={{ marginBottom: '14px' }}>
           <label style={labelStyle}>Role</label>
           <select style={inputStyle} value={form.role} onChange={(e) => set('role', e.target.value)}>
             <option value="viewer">Viewer — read-only access</option>
@@ -495,6 +574,48 @@ function CreateUserModal({ onSave, onClose }) {
             <option value="manager">Manager — can create, edit, and delete</option>
             <option value="admin">Admin — full access + user management</option>
           </select>
+        </div>
+
+        <div style={{ marginBottom: '20px' }}>
+          <label style={labelStyle}>App Access</label>
+          <div style={{
+            display: 'flex',
+            gap: '16px',
+            flexWrap: 'wrap',
+            padding: '12px 14px',
+            backgroundColor: '#131a24',
+            border: '1px solid #1e2d40',
+            borderRadius: '8px',
+          }}>
+            {allApps.map(app => {
+              const checked = form.role === 'admin' ? true : (form.app_access || []).includes(app.id)
+              return (
+                <label key={app.id} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  cursor: form.role === 'admin' ? 'not-allowed' : 'pointer',
+                  opacity: form.role === 'admin' ? 0.5 : 1,
+                  fontSize: '13px',
+                  color: checked ? '#c0cad8' : '#4a5a6e',
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={form.role === 'admin'}
+                    onChange={() => toggleApp(app.id)}
+                    style={{ accentColor: '#2563eb', width: '16px', height: '16px' }}
+                  />
+                  {app.label}
+                </label>
+              )
+            })}
+          </div>
+          {form.role === 'admin' && (
+            <div style={{ fontSize: '11px', color: '#4a5a6e', marginTop: '4px' }}>
+              Admins always have access to all apps
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
@@ -512,6 +633,7 @@ function CreateUserModal({ onSave, onClose }) {
     </div>
   )
 }
+
 function EditUserModal({ profile, onSave, onClose }) {
   const [form, setForm] = useState({
     full_name: profile.full_name || '',

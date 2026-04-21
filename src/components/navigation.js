@@ -11,7 +11,7 @@ export default function Navigation() {
   const router = useRouter()
   const supabase = createClient()
   const [openDropdown, setOpenDropdown] = useState(null)
-  const { isAdmin } = useRole()
+  const { isAdmin, hasAccess } = useRole()
 
   async function handleSignOut() {
     await supabase.auth.signOut()
@@ -22,6 +22,7 @@ export default function Navigation() {
   const tools = [
     {
       id: 'tracker',
+      appId: 'tracker',
       label: 'IT Tracker',
       icon: '⊞',
       basePath: '/tracker',
@@ -33,9 +34,9 @@ export default function Navigation() {
         { href: '/tracker/history', label: 'History' },
       ],
     },
-     
     {
       id: 'invoices',
+      appId: 'invoices',
       label: 'Invoice Processor',
       icon: '⊡',
       basePath: '/invoices',
@@ -45,6 +46,7 @@ export default function Navigation() {
     },
     {
       id: 'calculator',
+      appId: 'calculator',
       label: 'Material Calculator',
       icon: '⊞',
       basePath: '/calculator',
@@ -54,6 +56,7 @@ export default function Navigation() {
     },
     {
       id: 'wiki',
+      appId: 'wiki',
       label: 'Knowledge Base',
       icon: '⊡',
       basePath: '/wiki',
@@ -62,6 +65,9 @@ export default function Navigation() {
       ],
     },
   ]
+
+  // Filter tools based on user's app access
+  const visibleTools = tools.filter(t => hasAccess(t.appId))
 
   // Figure out which tool is active
   const activeTool = tools.find(t => pathname.startsWith(t.basePath))
@@ -114,7 +120,7 @@ export default function Navigation() {
 
         {/* Tool Dropdowns + Sub-nav */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          {tools.map(tool => {
+          {visibleTools.map(tool => {
             const isActive = pathname.startsWith(tool.basePath)
 
             return (
