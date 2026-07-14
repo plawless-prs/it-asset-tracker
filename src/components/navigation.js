@@ -55,13 +55,27 @@ export default function Navigation() {
       ],
     },
     {
-      id: 'wiki',
-      appId: 'wiki',
-      label: 'Knowledge Base',
-      icon: '⊡',
-      basePath: '/wiki',
+      id: 'helpdesk',
+      appId: 'helpdesk',
+      label: 'Help Desk',
+      icon: '⛑',
+      basePath: '/helpdesk',
       links: [
-        { href: '/wiki', label: 'Coming Soon' },
+        { href: '/helpdesk', label: 'Dashboard' },
+        { href: '/helpdesk/tickets', label: 'Tickets' },
+        { href: '/helpdesk/kb', label: 'Knowledge Base' },
+      ],
+    },
+    {
+      id: 'dailyops',
+      appId: 'dailyops',
+      label: 'Daily Ops',
+      icon: '☑',
+      basePath: '/dailyops',
+      links: [
+        { href: '/dailyops', label: "Today's Checklists" },
+        { href: '/dailyops/tasks', label: 'Tasks' },
+        { href: '/dailyops/templates', label: 'Templates' },
       ],
     },
   ]

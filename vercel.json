@@ -1,0 +1,5 @@
+{
+  "crons": [
+    { "path": "/api/helpdesk/graph-subscribe", "schedule": "0 6 * * *" }
+  ]
+}

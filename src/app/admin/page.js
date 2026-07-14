@@ -196,6 +196,8 @@ export default function AdminPage() {
     { id: 'tracker', label: 'IT Tracker' },
     { id: 'invoices', label: 'Invoice Processor' },
     { id: 'calculator', label: 'Material Calculator' },
+    { id: 'helpdesk', label: 'Help Desk' },
+    { id: 'dailyops', label: 'Daily Ops' },
   ]
 
   if (roleLoading || (!isAdmin && !roleLoading)) {
