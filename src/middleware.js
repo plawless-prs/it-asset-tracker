@@ -44,5 +44,10 @@ export async function middleware(request) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  // Exclude public webhook/API routes that authenticate themselves (token /
+  // clientState / bearer) and are called by external systems with no browser
+  // session: Graph notifications, the subscribe/renew endpoint, and inbound email.
+  matcher: [
+    '/((?!api/helpdesk/graph-notify|api/helpdesk/graph-subscribe|api/helpdesk/inbound|_next/static|_next/image|favicon.ico).*)',
+  ],
 }
