@@ -29,19 +29,23 @@ export async function POST(req) {
   let body
   try { body = await req.json() } catch { return new Response('bad request', { status: 400 }) }
 
+  const base = process.env.GRAPH_CLIENT_STATE || ''
   const notifications = Array.isArray(body?.value) ? body.value : []
   for (const n of notifications) {
-    if (process.env.GRAPH_CLIENT_STATE && n.clientState !== process.env.GRAPH_CLIENT_STATE) continue
+    const cs = n.clientState || ''
+    // Accept the bare secret (older subs) or "<secret>|<queue>" (current subs).
+    if (base && cs !== base && !cs.startsWith(base + '|')) continue
     try {
       const mailbox = extractMailbox(n.resource)
       const messageId = n.resourceData?.id
       if (!mailbox || !messageId) continue
       const msg = await fetchMessage(mailbox, messageId)
+      const queueFromState = cs.includes('|') ? cs.slice(cs.indexOf('|') + 1) : null
       await createEmailTicket({
         from: msg?.from?.emailAddress?.address || '',
         subject: msg?.subject || '',
         text: msg?.bodyPreview || '',
-        queue: mailboxToQueue(mailbox),
+        queue: queueFromState || mailboxToQueue(mailbox),
         messageId,
       })
     } catch (e) {

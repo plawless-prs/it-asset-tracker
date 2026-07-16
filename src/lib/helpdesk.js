@@ -28,6 +28,21 @@ export const PRIORITY_ORDER = ['low', 'medium', 'high', 'urgent']
 export const STATUS_ORDER = ['open', 'in_progress', 'waiting', 'resolved', 'closed']
 export const SOURCE_OPTIONS = ['manual', 'email', 'phone', 'chat', 'portal']
 
+export const CATEGORY_OPTIONS = [
+  { id: 'hardware', label: 'Hardware' },
+  { id: 'software', label: 'Software' },
+  { id: 'access', label: 'Access' },
+  { id: 'network', label: 'Network' },
+  { id: 'billing', label: 'Billing' },
+  { id: 'price_update', label: 'Price update' },
+  { id: 'other', label: 'Other' },
+]
+
+export function categoryLabel(id) {
+  const c = CATEGORY_OPTIONS.find(o => o.id === id)
+  return c ? c.label : (id || 'Uncategorized')
+}
+
 export const UNRESOLVED = ['open', 'in_progress', 'waiting']
 
 export function isUnresolved(status) {

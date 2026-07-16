@@ -5,10 +5,8 @@ import { useEffect, useState } from 'react'
 import { createClient } from '../../../../lib/supabase'
 import { useRole } from '../../../../lib/useRole'
 import {
-  PRIORITY_ORDER, PRIORITY_META, SOURCE_OPTIONS, displayName, sendNotify,
+  PRIORITY_ORDER, PRIORITY_META, SOURCE_OPTIONS, displayName, sendNotify, CATEGORY_OPTIONS,
 } from '../../../../lib/helpdesk'
-
-const CATEGORIES = ['hardware', 'software', 'access', 'network', 'billing', 'other']
 
 const inputStyle = {
   width: '100%', padding: '10px 14px', backgroundColor: '#131a24', border: '1px solid #1e2d40',
@@ -118,7 +116,7 @@ export default function NewTicket() {
           <div>
             <label style={labelStyle}>Category</label>
             <select style={inputStyle} value={form.category} onChange={e => set('category', e.target.value)}>
-              {CATEGORIES.map(c => <option key={c} value={c}>{c[0].toUpperCase() + c.slice(1)}</option>)}
+              {CATEGORY_OPTIONS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
             </select>
           </div>
           <div>

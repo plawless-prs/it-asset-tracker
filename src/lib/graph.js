@@ -71,13 +71,20 @@ export async function listSubscriptions() {
 // Create the subscription if missing, otherwise extend its expiry.
 // Graph caps message subscriptions at ~4230 minutes; we use 2 days and renew
 // daily via cron.
-export async function ensureSubscription(mailbox, notificationUrl, clientState) {
+export async function ensureSubscription(mailbox, notificationUrl, baseClientState, queue, recreate = false) {
   const expiration = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString()
+  // The queue ('it' | 'priceupdate') is embedded in clientState because Graph
+  // echoes clientState back on every notification, whereas the notification's
+  // resource string uses an internal id (not the email) and can't be matched.
+  const clientState = `${baseClientState}|${queue}`
   const subs = await listSubscriptions()
   const existing = subs.find(s => String(s.resource || '').toLowerCase().includes(mailbox.toLowerCase()) && s.notificationUrl === notificationUrl)
-  if (existing) {
+  if (existing && !recreate) {
     await graph(`/subscriptions/${existing.id}`, { method: 'PATCH', body: JSON.stringify({ expirationDateTime: expiration }) })
     return { mailbox, action: 'renewed', id: existing.id, expiration }
+  }
+  if (existing && recreate) {
+    await graph(`/subscriptions/${existing.id}`, { method: 'DELETE' })
   }
   const created = await graph('/subscriptions', {
     method: 'POST',
@@ -89,5 +96,5 @@ export async function ensureSubscription(mailbox, notificationUrl, clientState) 
       clientState,
     }),
   })
-  return { mailbox, action: 'created', id: created.id, expiration }
+  return { mailbox, action: recreate ? 'recreated' : 'created', id: created.id, expiration }
 }

@@ -8,6 +8,7 @@ import { useRole } from '../../../../lib/useRole'
 import {
   PRIORITY_ORDER, PRIORITY_META, STATUS_ORDER, STATUS_META, SLA_META,
   slaState, slaCountdown, displayName, requesterLabel, relativeTime, initials, sendNotify,
+  CATEGORY_OPTIONS, categoryLabel,
 } from '../../../../lib/helpdesk'
 
 const fieldSelect = {
@@ -318,6 +319,11 @@ export default function TicketDetail() {
               {STATUS_ORDER.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
             </select>
           </Field>
+          <Field label="Category">
+            <select style={fieldSelect} value={ticket.category || 'other'} onChange={e => updateField('category', e.target.value)}>
+              {CATEGORY_OPTIONS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+          </Field>
           <Field label="Priority">
             <select style={fieldSelect} value={ticket.priority} onChange={e => updateField('priority', e.target.value)}>
               {PRIORITY_ORDER.map(p => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}
@@ -336,7 +342,7 @@ export default function TicketDetail() {
               <span style={{ width: '30px', height: '30px', borderRadius: '50%', backgroundColor: '#332300', color: '#fbbf24', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{initials(requesterLabel(ticket))}</span>
               <div>
                 <div style={{ fontSize: '13px', color: '#c0cad8' }}>{requesterLabel(ticket)}</div>
-                <div style={{ fontSize: '11px', color: '#5a6e84' }}>{ticket.category || '—'}</div>
+                <div style={{ fontSize: '11px', color: '#5a6e84' }}>via {ticket.source}</div>
               </div>
             </div>
           </div>
