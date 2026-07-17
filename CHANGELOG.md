@@ -2,6 +2,11 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-07-17
+
+- **Dev onboarding:** added `.env.example` (env-var template, no secrets; `!.env.example` un-ignored) and a "Setting up on a new machine" section in `README.md` (prereqs → clone → `.env.local` → run).
+- **Agent config:** committed `.claude/settings.json` — auto-approves routine tool use, keeps `git add/commit/push` behind an `ask` prompt, and denies destructive commands (recursive deletes, `git reset --hard`, force-push, etc.).
+
 ## 2026-07-16 — Help Desk launch (replaces Invoice Processor)
 
 - **Help Desk app** (`helpdesk`): Freshservice-style dashboard, dense ticket queue (SLA state / status / priority / assignee, filters), two-pane ticket detail, and an agent-logs-on-behalf "New ticket" form. Registered in nav, home tiles, and admin access.

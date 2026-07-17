@@ -1,0 +1,45 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep"
+    ],
+    "ask": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(rm -fr:*)",
+      "Bash(rm -r:*)",
+      "Bash(:* rm -rf:*)",
+      "Bash(sudo:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git clean -f:*)",
+      "Bash(git clean -d:*)",
+      "Bash(git checkout -- :*)",
+      "Bash(git restore:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push:* --force:*)",
+      "Bash(git branch -D:*)",
+      "Bash(git reflog delete:*)",
+      "Bash(dd:*)",
+      "Bash(mkfs:*)",
+      "Bash(:> :*)",
+      "PowerShell(Remove-Item -Recurse -Force:*)",
+      "PowerShell(Remove-Item -Force -Recurse:*)",
+      "PowerShell(rm -Recurse -Force:*)",
+      "PowerShell(rd /s:*)",
+      "PowerShell(git reset --hard:*)",
+      "PowerShell(git clean -f:*)",
+      "PowerShell(git push --force:*)",
+      "PowerShell(git push -f:*)"
+    ]
+  }
+}
