@@ -29,6 +29,8 @@ export default function Navigation() {
       links: [
         { href: '/tracker', label: 'Dashboard' },
         { href: '/tracker/assets', label: 'Assets' },
+        { href: '/tracker/employees', label: 'Employees' },
+        { href: '/tracker/locations', label: 'Locations' },
         { href: '/tracker/licenses', label: 'Licenses' },
         { href: '/tracker/budget', label: 'Budget' },
         { href: '/tracker/history', label: 'History' },

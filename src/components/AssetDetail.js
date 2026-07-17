@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '../lib/supabase'
+import { statusColor, formatCurrency, formatDate, computeDepreciation } from '../lib/tracker'
 
 export default function AssetDetail({ asset, onClose, onCheckout, onCheckin, onDispose, onEdit }) {
   const supabase = createClient()
@@ -23,40 +24,9 @@ export default function AssetDetail({ asset, onClose, onCheckout, onCheckin, onD
   }
 
   // Depreciation calculation
-  let depreciationPct = 0
-  let currentValue = Number(asset.purchase_cost || 0)
+  const { pct: depreciationPct, currentValue } = computeDepreciation(asset)
 
-  if (asset.purchase_date && asset.purchase_cost && asset.useful_life_months) {
-    const monthsElapsed = (new Date() - new Date(asset.purchase_date)) / (1000 * 60 * 60 * 24 * 30.44)
-    depreciationPct = Math.min((monthsElapsed / Number(asset.useful_life_months)) * 100, 100)
-    currentValue = Math.max(Number(asset.purchase_cost) * (1 - depreciationPct / 100), 0)
-  }
-
-  function formatCurrency(n) {
-    return '$' + Number(n || 0).toLocaleString('en-US', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })
-  }
-
-  function formatDate(d) {
-    if (!d) return '—'
-    return new Date(d).toLocaleDateString('en-US', {
-      month: 'short', day: 'numeric', year: 'numeric',
-    })
-  }
-
-  const statusColors = {
-    'Ready to Deploy': { bg: '#0d3320', text: '#4ade80', border: '#166534' },
-    'Deployed': { bg: '#1e2a3a', text: '#60a5fa', border: '#1e40af' },
-    'Pending': { bg: '#332800', text: '#fbbf24', border: '#854d0e' },
-    'In Repair': { bg: '#331a00', text: '#fb923c', border: '#9a3412' },
-    'Archived': { bg: '#1a1a2e', text: '#a78bfa', border: '#5b21b6' },
-    'Lost/Stolen': { bg: '#330d0d', text: '#f87171', border: '#991b1b' },
-    'Disposed': { bg: '#1a1a1a', text: '#737373', border: '#404040' },
-  }
-
-  const sc = statusColors[asset.status] || statusColors['Pending']
+  const sc = statusColor(asset.status)
 
   const btnStyle = {
     padding: '8px 18px',
@@ -109,7 +79,7 @@ export default function AssetDetail({ asset, onClose, onCheckout, onCheckin, onD
               {asset.name}
             </h2>
             <div style={{ fontSize: '12px', color: '#4a5a6e', marginTop: '4px' }}>
-              ID: #{asset.id} · {asset.serial_number || 'No serial'}
+              {asset.asset_tag || `#${asset.id}`} · {asset.serial_number || 'No serial'}
             </div>
           </div>
           <span style={{
@@ -151,7 +121,7 @@ export default function AssetDetail({ asset, onClose, onCheckout, onCheckin, onD
         }}>
           <div><span style={{ color: '#4a5a6e' }}>Category: </span><span style={{ color: '#8aa0b8' }}>{asset.category}</span></div>
           <div><span style={{ color: '#4a5a6e' }}>Make/Model: </span><span style={{ color: '#8aa0b8' }}>{asset.make} {asset.model}</span></div>
-          <div><span style={{ color: '#4a5a6e' }}>Assigned To: </span><span style={{ color: '#8aa0b8' }}>{asset.assigned_to || '—'}</span></div>
+          <div><span style={{ color: '#4a5a6e' }}>Assigned To: </span><span style={{ color: '#8aa0b8' }}>{asset.employee?.full_name || asset.assigned_to || '—'}</span></div>
           <div><span style={{ color: '#4a5a6e' }}>Location: </span><span style={{ color: '#8aa0b8' }}>{asset.location || '—'}</span></div>
           <div><span style={{ color: '#4a5a6e' }}>Purchase Date: </span><span style={{ color: '#8aa0b8' }}>{formatDate(asset.purchase_date)}</span></div>
           <div><span style={{ color: '#4a5a6e' }}>Warranty: </span><span style={{ color: '#8aa0b8' }}>{formatDate(asset.warranty_expiry)}</span></div>

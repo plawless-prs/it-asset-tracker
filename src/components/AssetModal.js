@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { createClient } from '../lib/supabase'
+import { ASSET_CATEGORIES, ASSET_STATUSES } from '../lib/tracker'
 
 export default function AssetModal({ asset, onSave, onClose }) {
   const supabase = createClient()
@@ -19,7 +20,7 @@ export default function AssetModal({ asset, onSave, onClose }) {
     purchase_date: asset?.purchase_date || '',
     warranty_expiry: asset?.warranty_expiry || '',
     useful_life_months: asset?.useful_life_months || '60',
-    assigned_to: asset?.assigned_to || '',
+    assigned_employee_id: asset?.assigned_employee_id || '',
     location: asset?.location || '',
     notes: asset?.notes || '',
     photo_url: asset?.photo_url || '',
@@ -28,6 +29,19 @@ export default function AssetModal({ asset, onSave, onClose }) {
   const [photoPreview, setPhotoPreview] = useState(asset?.photo_url || '')
   const [photoFile, setPhotoFile] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [employees, setEmployees] = useState([])
+
+  // Legacy free-text assignee shown as a hint when a row predates the FK.
+  const legacyAssignedTo = !asset?.assigned_employee_id ? asset?.assigned_to : null
+
+  useEffect(() => {
+    supabase
+      .from('employees')
+      .select('id, full_name, department')
+      .eq('status', 'active')
+      .order('full_name')
+      .then(({ data }) => { if (data) setEmployees(data) })
+  }, [])
 
   function set(key, value) {
     setForm(prev => ({ ...prev, [key]: value }))
@@ -83,7 +97,11 @@ export default function AssetModal({ asset, onSave, onClose }) {
       purchase_date: form.purchase_date || null,
       warranty_expiry: form.warranty_expiry || null,
       useful_life_months: form.useful_life_months ? Number(form.useful_life_months) : 60,
-      assigned_to: form.assigned_to.trim() || null,
+      assigned_employee_id: form.assigned_employee_id || null,
+      // Cached assignee name for list display / search; cleared when unassigned.
+      assigned_to: form.assigned_employee_id
+        ? (employees.find(e => e.id === form.assigned_employee_id)?.full_name || null)
+        : null,
       location: form.location.trim() || null,
       notes: form.notes.trim() || null,
       photo_url: photoUrl || null,
@@ -232,7 +250,7 @@ export default function AssetModal({ asset, onSave, onClose }) {
           <div>
             <label style={labelStyle}>Category</label>
             <select style={inputStyle} value={form.category} onChange={(e) => set('category', e.target.value)}>
-              {['Hardware', 'Software', 'Peripheral', 'Network', 'Mobile', 'Other'].map(c => (
+              {ASSET_CATEGORIES.map(c => (
                 <option key={c}>{c}</option>
               ))}
             </select>
@@ -247,7 +265,7 @@ export default function AssetModal({ asset, onSave, onClose }) {
           <div>
             <label style={labelStyle}>Status</label>
             <select style={inputStyle} value={form.status} onChange={(e) => set('status', e.target.value)}>
-              {['Ready to Deploy', 'Deployed', 'Pending', 'In Repair', 'Archived', 'Lost/Stolen', 'Disposed'].map(s => (
+              {ASSET_STATUSES.map(s => (
                 <option key={s}>{s}</option>
               ))}
             </select>
@@ -290,7 +308,19 @@ export default function AssetModal({ asset, onSave, onClose }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
           <div>
             <label style={labelStyle}>Assigned To</label>
-            <input style={inputStyle} value={form.assigned_to} onChange={(e) => set('assigned_to', e.target.value)} placeholder="Employee name" />
+            <select style={inputStyle} value={form.assigned_employee_id} onChange={(e) => set('assigned_employee_id', e.target.value)}>
+              <option value="">— Unassigned —</option>
+              {employees.map(e => (
+                <option key={e.id} value={e.id}>
+                  {e.full_name}{e.department ? ` · ${e.department}` : ''}
+                </option>
+              ))}
+            </select>
+            {legacyAssignedTo && (
+              <div style={{ fontSize: '11px', color: '#fbbf24', marginTop: '4px' }}>
+                Was: {legacyAssignedTo} — pick the matching employee to migrate.
+              </div>
+            )}
           </div>
           <div>
             <label style={labelStyle}>Location</label>

@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '../../../lib/supabase'
+import { ASSET_STATUSES, statusColor, formatCurrency } from '../../../lib/tracker'
 import AssetModal from '../../../components/AssetModal'
 import AssetDetail from '../../../components/AssetDetail'
+import CheckoutModal from '../../../components/CheckoutModal'
 
 export default function AssetsPage() {
   const supabase = createClient()
@@ -14,6 +16,7 @@ export default function AssetsPage() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingAsset, setEditingAsset] = useState(null)
   const [selectedAsset, setSelectedAsset] = useState(null)
+  const [checkoutAsset, setCheckoutAsset] = useState(null)
 
   useEffect(() => {
     loadAssets()
@@ -22,7 +25,7 @@ export default function AssetsPage() {
   async function loadAssets() {
     const { data, error } = await supabase
       .from('assets')
-      .select('*')
+      .select('*, employee:employees(full_name)')
       .order('created_at', { ascending: false })
 
     if (data) setAssets(data)
@@ -41,19 +44,26 @@ export default function AssetsPage() {
     })
   }
 
-  // Check out an asset to someone
-  async function handleCheckout(asset) {
-    const name = prompt('Assign to (employee name):')
-    if (!name) return
+  // Check out an asset — open the employee picker
+  function handleCheckout(asset) {
+    setSelectedAsset(null)
+    setCheckoutAsset(asset)
+  }
 
+  // Confirm checkout from the picker: assign to the chosen employee.
+  // assigned_employee_id is the source of truth; assigned_to keeps a cached
+  // name for the list display/search and readable audit-log entries.
+  async function confirmCheckout(emp) {
+    const asset = checkoutAsset
     await supabase.from('assets').update({
       status: 'Deployed',
-      assigned_to: name,
+      assigned_employee_id: emp.id,
+      assigned_to: emp.full_name,
       assigned_date: new Date().toISOString(),
     }).eq('id', asset.id)
 
-    await logAction('checked_out', 'asset', asset.id, `"${asset.name}" checked out to ${name}`)
-    setSelectedAsset(null)
+    await logAction('checked_out', 'asset', asset.id, `"${asset.name}" checked out to ${emp.full_name}`)
+    setCheckoutAsset(null)
     loadAssets()
   }
 
@@ -61,6 +71,7 @@ export default function AssetsPage() {
   async function handleCheckin(asset) {
     await supabase.from('assets').update({
       status: 'Ready to Deploy',
+      assigned_employee_id: null,
       assigned_to: null,
       assigned_date: null,
     }).eq('id', asset.id)
@@ -104,31 +115,13 @@ export default function AssetsPage() {
     if (statusFilter !== 'All' && a.status !== statusFilter) return false
     if (searchTerm) {
       const term = searchTerm.toLowerCase()
-      const searchable = `${a.name} ${a.serial_number} ${a.assigned_to} ${a.category} ${a.make} ${a.model}`.toLowerCase()
+      const searchable = `${a.name} ${a.asset_tag} ${a.serial_number} ${a.employee?.full_name || a.assigned_to} ${a.category} ${a.make} ${a.model}`.toLowerCase()
       if (!searchable.includes(term)) return false
     }
     return true
   })
 
-  const statuses = ['All', 'Ready to Deploy', 'Deployed', 'Pending', 'In Repair', 'Archived', 'Lost/Stolen', 'Disposed']
-
-  const statusColors = {
-    'Ready to Deploy': { bg: '#0d3320', text: '#4ade80', border: '#166534' },
-    'Deployed': { bg: '#1e2a3a', text: '#60a5fa', border: '#1e40af' },
-    'Pending': { bg: '#332800', text: '#fbbf24', border: '#854d0e' },
-    'In Repair': { bg: '#331a00', text: '#fb923c', border: '#9a3412' },
-    'Archived': { bg: '#1a1a2e', text: '#a78bfa', border: '#5b21b6' },
-    'Lost/Stolen': { bg: '#330d0d', text: '#f87171', border: '#991b1b' },
-    'Disposed': { bg: '#1a1a1a', text: '#737373', border: '#404040' },
-  }
-
-  function formatCurrency(n) {
-    if (!n) return '—'
-    return '$' + Number(n).toLocaleString('en-US', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })
-  }
+  const statuses = ['All', ...ASSET_STATUSES]
 
   return (
     <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '28px 24px 60px' }}>
@@ -258,7 +251,7 @@ export default function AssetsPage() {
 
           {/* Asset Rows */}
           {filtered.map(asset => {
-            const sc = statusColors[asset.status] || statusColors['Pending']
+            const sc = statusColor(asset.status)
             return (
               <div
                 key={asset.id}
@@ -316,7 +309,7 @@ export default function AssetsPage() {
                 </div>
 
                 <span style={{ color: '#6a7e94' }}>{asset.category || '—'}</span>
-                <span style={{ color: '#6a7e94' }}>{asset.assigned_to || '—'}</span>
+                <span style={{ color: '#6a7e94' }}>{asset.employee?.full_name || asset.assigned_to || '—'}</span>
 
                 {/* Status badge */}
                 <span style={{
@@ -334,7 +327,7 @@ export default function AssetsPage() {
                 </span>
 
                 <span style={{ color: '#8aa0b8' }}>
-                  {formatCurrency(asset.purchase_cost)}
+                  {formatCurrency(asset.purchase_cost, { blankDash: true })}
                 </span>
               </div>
             )
@@ -360,6 +353,15 @@ export default function AssetsPage() {
           onCheckin={handleCheckin}
           onDispose={handleDispose}
           onEdit={(asset) => { setSelectedAsset(null); setEditingAsset(asset) }}
+        />
+      )}
+
+      {/* Checkout (assign to employee) Modal */}
+      {checkoutAsset && (
+        <CheckoutModal
+          asset={checkoutAsset}
+          onConfirm={confirmCheckout}
+          onClose={() => setCheckoutAsset(null)}
         />
       )}
     </div>

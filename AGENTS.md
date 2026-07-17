@@ -46,6 +46,17 @@ Each app is gated per-user. Current apps: **IT Tracker** (`tracker`), **Material
 - **Categories** are a `category` text field; the shared list + labels live in `CATEGORY_OPTIONS`/`categoryLabel` in `src/lib/helpdesk.js`.
 - **Email (Microsoft Graph, not Power Automate):** inbound via Graph push subscriptions → `POST /api/helpdesk/graph-notify` creates a ticket; `POST /api/helpdesk/graph-subscribe` creates/renews subscriptions (daily Vercel cron). Outbound sends as `it@` via Graph (`/api/helpdesk/notify`, Power Automate fallback retained). The mailbox→category queue is carried in the subscription `clientState` (`<secret>|<queue>`), because Graph's notification `resource` uses an internal id, not the email. `it@` → general; `priceupdate@` → `price_update` category. Full setup: `docs/email-setup-graph.md`.
 
+## IT Tracker (asset management)
+
+Being fleshed out in stages (see `CHANGELOG.md`; **Stage 0 done**, employees/rack views to come).
+
+- Routes under `src/app/tracker/`: dashboard (`/tracker`), assets list (`/tracker/assets`), licenses, budget, history. Guarded once in `src/app/tracker/layout.js` via `hasAccess('tracker')`.
+- Shared helpers live in **`src/lib/tracker.js`** (statuses, categories, asset **types** with a `computer` flag, status colors, `formatCurrency`/`formatDate`, straight-line depreciation) — reuse these instead of re-declaring inline.
+- **Schema:** tracker DDL is committed across numbered migrations starting at `supabase/05_tracker_schema.sql` (the tables predated it and were hand-made, so migrations are idempotent/additive). Tables: `assets`, `employees` (company directory, distinct from app-login `profiles`; `first_name`/`last_name` with `full_name` as the app-written combined value), `locations` → `rooms` (two-level hierarchy; employees/assets/racks carry `location_id` + optional `room_id`), `racks`, plus `licenses/budgets/purchases/subscriptions/audit_log`. Later migrations: `06` (employee name split), `07` (location→room hierarchy).
+- **Asset IDs:** every asset gets an immutable `asset_tag` = `PRS-#####` (global `asset_tag_seq`, auto-assigned via column default). This ID is also the printed asset-tag label.
+- **Rack membership:** a device with `rack_id` + `u_position` is mounted at that U; `rack_id` set with `u_position` NULL = "off-rack" (in the room, not physically racked). Rack total power is derived by summing device `watts`, not stored.
+- `assigned_employee_id` (FK → `employees`) is the real assignment; the legacy free-text `assigned_to` is retained until Stage 1 migrates the UI.
+
 ## Environment variables
 
 App: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
