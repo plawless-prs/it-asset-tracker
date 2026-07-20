@@ -4,43 +4,48 @@ import { useState, useRef, useEffect } from 'react'
 import { createClient } from '../lib/supabase'
 import { ASSET_CATEGORIES, ASSET_STATUSES, ASSET_TYPES, isComputerType, isRackableType, rackPlacementError } from '../lib/tracker'
 
-export default function AssetModal({ asset, onSave, onClose }) {
+export default function AssetModal({ asset, defaults, onSave, onClose }) {
   const supabase = createClient()
   const fileRef = useRef(null)
   const isEditing = !!asset
 
+  // For a new asset, `defaults` can seed the form (e.g. reconciling an audit's
+  // unexpected device: prefill name + rack + U position). When editing, the
+  // asset itself is the source.
+  const init = asset || defaults || {}
+
   const [form, setForm] = useState({
-    name: asset?.name || '',
-    category: asset?.category || 'Hardware',
-    type: asset?.type || '',
-    serial_number: asset?.serial_number || '',
-    make: asset?.make || '',
-    model: asset?.model || '',
-    status: asset?.status || 'Ready to Deploy',
-    purchase_cost: asset?.purchase_cost || '',
-    purchase_date: asset?.purchase_date || '',
-    warranty_expiry: asset?.warranty_expiry || '',
-    useful_life_months: asset?.useful_life_months || '60',
-    assigned_employee_id: asset?.assigned_employee_id || '',
-    location_id: asset?.location_id || '',
-    room_id: asset?.room_id || '',
+    name: init.name || '',
+    category: init.category || 'Hardware',
+    type: init.type || '',
+    serial_number: init.serial_number || '',
+    make: init.make || '',
+    model: init.model || '',
+    status: init.status || 'Ready to Deploy',
+    purchase_cost: init.purchase_cost || '',
+    purchase_date: init.purchase_date || '',
+    warranty_expiry: init.warranty_expiry || '',
+    useful_life_months: init.useful_life_months || '60',
+    assigned_employee_id: init.assigned_employee_id || '',
+    location_id: init.location_id || '',
+    room_id: init.room_id || '',
     // Computer/server detail fields
-    hostname: asset?.hostname || '',
-    ip_address: asset?.ip_address || '',
-    os: asset?.os || '',
-    cpu: asset?.cpu || '',
-    ram: asset?.ram || '',
-    storage: asset?.storage || '',
+    hostname: init.hostname || '',
+    ip_address: init.ip_address || '',
+    os: init.os || '',
+    cpu: init.cpu || '',
+    ram: init.ram || '',
+    storage: init.storage || '',
     // Other-device detail field
-    management_url: asset?.management_url || '',
+    management_url: init.management_url || '',
     // Rack-mountability is an explicit per-asset choice (not inferred from type)
-    rack_mountable: asset?.rack_mountable ?? false,
-    rack_id: asset?.rack_id || '',
-    watts: asset?.watts ?? '',
-    u_height: asset?.u_height ?? '',
-    u_position: asset?.u_position ?? '',
-    notes: asset?.notes || '',
-    photo_url: asset?.photo_url || '',
+    rack_mountable: init.rack_mountable ?? false,
+    rack_id: init.rack_id || '',
+    watts: init.watts ?? '',
+    u_height: init.u_height ?? '',
+    u_position: init.u_position ?? '',
+    notes: init.notes || '',
+    photo_url: init.photo_url || '',
   })
 
   const isComputer = isComputerType(form.type)

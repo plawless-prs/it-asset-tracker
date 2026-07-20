@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '../../../../lib/supabase'
-import { statusColor } from '../../../../lib/tracker'
+import { statusColor, formatDate, countDiscrepancies } from '../../../../lib/tracker'
 import RackModal from '../../../../components/RackModal'
 import AssetModal from '../../../../components/AssetModal'
 import PlaceDeviceModal from '../../../../components/PlaceDeviceModal'
@@ -18,6 +18,8 @@ export default function RackDetailPage() {
 
   const [rack, setRack] = useState(null)
   const [devices, setDevices] = useState([])
+  const [audits, setAudits] = useState([])
+  const [starting, setStarting] = useState(false)
   const [loading, setLoading] = useState(true)
   const [editingRack, setEditingRack] = useState(false)
   const [editingDevice, setEditingDevice] = useState(null)
@@ -30,13 +32,49 @@ export default function RackDetailPage() {
   }, [id])
 
   async function loadData() {
-    const [{ data: rk }, { data: devs }] = await Promise.all([
+    const [{ data: rk }, { data: devs }, { data: auds }] = await Promise.all([
       supabase.from('racks').select('*, location:locations(name), room:rooms(name)').eq('id', id).single(),
       supabase.from('assets').select('*').eq('rack_id', id).order('u_position', { ascending: false }),
+      supabase.from('rack_audits')
+        .select('*, auditor:profiles(full_name, email), items:rack_audit_items(result, condition)')
+        .eq('rack_id', id)
+        .order('started_at', { ascending: false }),
     ])
     setRack(rk || null)
     setDevices(devs || [])
+    setAudits(auds || [])
     setLoading(false)
+  }
+
+  // Start a new audit: snapshot the currently-mounted devices as expected items,
+  // then open the audit page to conduct it.
+  async function startAudit() {
+    setStarting(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: audit, error } = await supabase.from('rack_audits')
+      .insert({ rack_id: id, auditor_id: user?.id || null, status: 'in_progress' })
+      .select()
+      .single()
+    if (error || !audit) {
+      alert('Could not start audit: ' + (error?.message || 'unknown error'))
+      setStarting(false)
+      return
+    }
+    const mountedNow = devices.filter(d => d.u_position != null)
+    if (mountedNow.length > 0) {
+      await supabase.from('rack_audit_items').insert(
+        mountedNow.map(d => ({
+          audit_id: audit.id,
+          asset_id: d.id,
+          device_name: d.name,
+          device_type: d.type,
+          expected_u_position: d.u_position,
+          expected_u_height: d.u_height || 1,
+          result: 'pending',
+        }))
+      )
+    }
+    router.push(`/tracker/racks/${id}/audits/${audit.id}`)
   }
 
   function handleRackSaved() {
@@ -84,6 +122,9 @@ export default function RackDetailPage() {
 
   const totalWatts = devices.reduce((sum, d) => sum + (d.watts || 0), 0)
   const uUsed = mounted.reduce((sum, d) => sum + (d.u_height || 1), 0)
+
+  const activeAudit = audits.find(a => a.status === 'in_progress')
+  const lastCompleted = audits.find(a => a.status === 'completed') // audits are sorted newest-first
 
   // Map each U to the device occupying it (for rendering the grid)
   const occupancy = {}
@@ -302,6 +343,99 @@ export default function RackDetailPage() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Audits */}
+      <div style={{ marginTop: '32px' }}>
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px',
+        }}>
+          <div style={{ fontSize: '15px', fontWeight: '700', color: '#c0cad8' }}>
+            Audits
+            {lastCompleted && (
+              <span style={{ fontSize: '12px', fontWeight: '500', color: '#5a6e84', marginLeft: '10px' }}>
+                Last completed {formatDate(lastCompleted.completed_at)}
+              </span>
+            )}
+          </div>
+          {activeAudit ? (
+            <button
+              onClick={() => router.push(`/tracker/racks/${id}/audits/${activeAudit.id}`)}
+              style={{
+                backgroundColor: '#332800', color: '#fbbf24', padding: '8px 18px', borderRadius: '8px',
+                fontWeight: '600', fontSize: '12.5px', border: '1px solid #854d0e', cursor: 'pointer',
+              }}
+            >
+              Resume Audit
+            </button>
+          ) : (
+            <button
+              onClick={startAudit}
+              disabled={starting}
+              style={{
+                backgroundColor: starting ? '#1e40af' : '#2563eb', color: '#fff', padding: '8px 18px',
+                borderRadius: '8px', fontWeight: '600', fontSize: '12.5px', border: 'none',
+                cursor: starting ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {starting ? 'Starting…' : '+ Start Audit'}
+            </button>
+          )}
+        </div>
+
+        {audits.length === 0 ? (
+          <div style={{
+            backgroundColor: '#0f1620', border: '1px solid #182030', borderRadius: '12px',
+            padding: '28px', fontSize: '13px', color: '#3a4a5e', textAlign: 'center',
+          }}>
+            No audits yet. Start one to snapshot the rack and walk through each device.
+          </div>
+        ) : (
+          <div style={{ backgroundColor: '#0f1620', border: '1px solid #182030', borderRadius: '12px', overflow: 'hidden' }}>
+            <div style={{
+              display: 'grid', gridTemplateColumns: '150px 120px 1fr 130px', padding: '10px 18px',
+              fontSize: '11px', fontWeight: '600', color: '#4a5a6e', textTransform: 'uppercase',
+              letterSpacing: '0.8px', borderBottom: '1px solid #182030', backgroundColor: '#0c1118',
+            }}>
+              <span>Date</span>
+              <span>Status</span>
+              <span>Auditor</span>
+              <span>Discrepancies</span>
+            </div>
+            {audits.map(a => {
+              const done = a.status === 'completed'
+              const disc = countDiscrepancies(a.items)
+              return (
+                <div
+                  key={a.id}
+                  onClick={() => router.push(`/tracker/racks/${id}/audits/${a.id}`)}
+                  style={{
+                    display: 'grid', gridTemplateColumns: '150px 120px 1fr 130px', padding: '12px 18px',
+                    alignItems: 'center', borderBottom: '1px solid #141d28', cursor: 'pointer', fontSize: '13px',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#111a26'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  <span style={{ color: '#c0cad8' }}>{formatDate(a.started_at)}</span>
+                  <span>
+                    <span style={{
+                      display: 'inline-flex', padding: '3px 10px', borderRadius: '100px', fontSize: '11px', fontWeight: '600',
+                      backgroundColor: done ? '#0d3320' : '#332800',
+                      color: done ? '#4ade80' : '#fbbf24',
+                      border: `1px solid ${done ? '#166534' : '#854d0e'}`,
+                    }}>
+                      {done ? 'Completed' : 'In progress'}
+                    </span>
+                  </span>
+                  <span style={{ color: '#6a7e94' }}>{a.auditor?.full_name || a.auditor?.email || '—'}</span>
+                  <span style={{ color: disc > 0 ? '#f87171' : '#4ade80' }}>
+                    {done ? (disc > 0 ? `${disc} discrepanc${disc === 1 ? 'y' : 'ies'}` : 'All clear') : '—'}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {editingRack && (

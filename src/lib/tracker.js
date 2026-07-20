@@ -116,6 +116,41 @@ export function formatDate(d) {
   })
 }
 
+// --- Rack audits ------------------------------------------------------------
+// Per-item outcome of a rack audit. `present` is the only "all good" result;
+// missing/moved/extra are discrepancies. `pending` = not yet reviewed.
+export const AUDIT_RESULTS = [
+  { value: 'present', label: 'Present', color: { bg: '#0d3320', text: '#4ade80', border: '#166534' } },
+  { value: 'moved',   label: 'Moved',   color: { bg: '#332800', text: '#fbbf24', border: '#854d0e' } },
+  { value: 'missing', label: 'Missing', color: { bg: '#330d0d', text: '#f87171', border: '#991b1b' } },
+  { value: 'extra',   label: 'Extra',   color: { bg: '#1e2a3a', text: '#60a5fa', border: '#1e40af' } },
+]
+
+export function auditResultMeta(value) {
+  return AUDIT_RESULTS.find(r => r.value === value)
+    || { value: 'pending', label: 'Pending', color: { bg: '#1a1a1a', text: '#737373', border: '#404040' } }
+}
+
+// Device condition noted during an audit (optional per item).
+export const AUDIT_CONDITIONS = [
+  { value: '',                label: '—' },
+  { value: 'ok',              label: 'OK' },
+  { value: 'needs_attention', label: 'Needs attention' },
+  { value: 'damaged',         label: 'Damaged' },
+]
+
+// A discrepancy is anything not cleanly "present" in its expected slot: missing,
+// moved, extra, or flagged with a non-OK condition.
+export function isDiscrepancy(item) {
+  if (['missing', 'moved', 'extra'].includes(item.result)) return true
+  if (item.condition && item.condition !== 'ok') return true
+  return false
+}
+
+export function countDiscrepancies(items) {
+  return (items || []).filter(isDiscrepancy).length
+}
+
 // --- Depreciation (straight-line) -------------------------------------------
 // Returns { pct, currentValue }. Pure function of the asset row.
 export function computeDepreciation(asset) {
