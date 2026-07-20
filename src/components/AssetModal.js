@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { createClient } from '../lib/supabase'
-import { ASSET_CATEGORIES, ASSET_STATUSES, ASSET_TYPES, isComputerType, isRackableType } from '../lib/tracker'
+import { ASSET_CATEGORIES, ASSET_STATUSES, ASSET_TYPES, isComputerType, isRackableType, rackPlacementError } from '../lib/tracker'
 
 export default function AssetModal({ asset, onSave, onClose }) {
   const supabase = createClient()
@@ -33,7 +33,9 @@ export default function AssetModal({ asset, onSave, onClose }) {
     storage: asset?.storage || '',
     // Other-device detail field
     management_url: asset?.management_url || '',
-    // Rack / power fields (rackable types)
+    // Rack-mountability is an explicit per-asset choice (not inferred from type)
+    rack_mountable: asset?.rack_mountable ?? false,
+    rack_id: asset?.rack_id || '',
     watts: asset?.watts ?? '',
     u_height: asset?.u_height ?? '',
     u_position: asset?.u_position ?? '',
@@ -42,7 +44,6 @@ export default function AssetModal({ asset, onSave, onClose }) {
   })
 
   const isComputer = isComputerType(form.type)
-  const isRackable = isRackableType(form.type)
 
   const [photoPreview, setPhotoPreview] = useState(asset?.photo_url || '')
   const [photoFile, setPhotoFile] = useState(null)
@@ -50,6 +51,7 @@ export default function AssetModal({ asset, onSave, onClose }) {
   const [employees, setEmployees] = useState([])
   const [locations, setLocations] = useState([])
   const [rooms, setRooms] = useState([])
+  const [racks, setRacks] = useState([])
 
   // Legacy free-text values shown as hints when a row predates the FK.
   const legacyAssignedTo = !asset?.assigned_employee_id ? asset?.assigned_to : null
@@ -72,7 +74,27 @@ export default function AssetModal({ asset, onSave, onClose }) {
       .select('id, name, location_id')
       .order('name')
       .then(({ data }) => { if (data) setRooms(data) })
+    supabase
+      .from('racks')
+      .select('id, name, u_height')
+      .order('name')
+      .then(({ data }) => { if (data) setRacks(data) })
   }, [])
+
+  // Clearing the rack also clears the U position (can't be mounted with no rack)
+  function setRack(rackId) {
+    setForm(prev => ({ ...prev, rack_id: rackId, u_position: rackId ? prev.u_position : '' }))
+  }
+
+  // Picking a type suggests a rack-mountable default for a NEW asset (Server →
+  // checked, Monitor → unchecked); on edits we leave the user's choice alone.
+  function setType(t) {
+    setForm(prev => ({
+      ...prev,
+      type: t,
+      rack_mountable: isEditing ? prev.rack_mountable : isRackableType(t),
+    }))
+  }
 
   function set(key, value) {
     setForm(prev => ({ ...prev, [key]: value }))
@@ -98,6 +120,29 @@ export default function AssetModal({ asset, onSave, onClose }) {
   async function handleSubmit() {
     if (!form.name.trim()) return alert('Asset name is required')
     setSaving(true)
+
+    // Rack fit / overlap safeguard: a rack-mountable device placed at a U
+    // position must fit the rack and not collide with another device there.
+    if (form.rack_mountable && form.rack_id && form.u_position !== '' && form.u_position != null) {
+      const rackObj = racks.find(r => r.id === form.rack_id)
+      const { data: occupied } = await supabase
+        .from('assets')
+        .select('id, name, u_position, u_height')
+        .eq('rack_id', form.rack_id)
+        .not('u_position', 'is', null)
+      const placementError = rackPlacementError({
+        uStart: form.u_position,
+        uHeight: form.u_height || 1,
+        rackHeight: rackObj?.u_height,
+        occupied: occupied || [],
+        excludeId: asset?.id,
+      })
+      if (placementError) {
+        alert(placementError)
+        setSaving(false)
+        return
+      }
+    }
 
     let photoUrl = form.photo_url
 
@@ -157,10 +202,13 @@ export default function AssetModal({ asset, onSave, onClose }) {
       storage:    isComputer ? (form.storage.trim() || null) : null,
       // Management URL — other (non-computer) devices only
       management_url: (form.type && !isComputer) ? (form.management_url.trim() || null) : null,
-      // Rack / power fields — rackable types only
-      watts:      isRackable ? num(form.watts) : null,
-      u_height:   isRackable ? num(form.u_height) : null,
-      u_position: isRackable ? num(form.u_position) : null,
+      // Rack / power fields — only when the asset is flagged rack-mountable.
+      // u_position requires a rack (rack set + u_position null = "off-rack, in the room").
+      rack_mountable: form.rack_mountable,
+      rack_id:    form.rack_mountable ? (form.rack_id || null) : null,
+      watts:      form.rack_mountable ? num(form.watts) : null,
+      u_height:   form.rack_mountable ? num(form.u_height) : null,
+      u_position: (form.rack_mountable && form.rack_id) ? num(form.u_position) : null,
       notes: form.notes.trim() || null,
       photo_url: photoUrl || null,
       updated_at: new Date().toISOString(),
@@ -318,7 +366,7 @@ export default function AssetModal({ asset, onSave, onClose }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
           <div>
             <label style={labelStyle}>Type</label>
-            <select style={inputStyle} value={form.type} onChange={(e) => set('type', e.target.value)}>
+            <select style={inputStyle} value={form.type} onChange={(e) => setType(e.target.value)}>
               <option value="">— Select type —</option>
               {ASSET_TYPES.map(t => (
                 <option key={t.value} value={t.value}>{t.value}</option>
@@ -397,13 +445,41 @@ export default function AssetModal({ asset, onSave, onClose }) {
           </div>
         )}
 
-        {/* Rack / power fields — rackable types */}
-        {isRackable && (
+        {/* Rack-mountable toggle — independent of type, so any device (incl. "Other") can be racked */}
+        <label
+          style={{
+            display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer',
+            marginBottom: '14px', padding: '10px 14px', borderRadius: '8px',
+            border: '1px solid #1e2d40', backgroundColor: '#0c1118',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={form.rack_mountable}
+            onChange={(e) => set('rack_mountable', e.target.checked)}
+            style={{ width: '16px', height: '16px', accentColor: '#2563eb', cursor: 'pointer' }}
+          />
+          <span style={{ fontSize: '13px', color: '#c0cad8', fontWeight: '500' }}>
+            Rack-mountable device
+          </span>
+        </label>
+
+        {/* Rack / power fields — shown when the asset is flagged rack-mountable */}
+        {form.rack_mountable && (
           <div style={{
             border: '1px solid #182030', borderRadius: '12px', padding: '16px',
             marginBottom: '14px', backgroundColor: '#0c1118',
           }}>
             <div style={{ ...labelStyle, color: '#6a7e94', marginBottom: '12px' }}>Rack / Power</div>
+            <div style={{ marginBottom: '14px' }}>
+              <label style={labelStyle}>Rack</label>
+              <select style={inputStyle} value={form.rack_id} onChange={(e) => setRack(e.target.value)}>
+                <option value="">— Not in a rack —</option>
+                {racks.map(r => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
               <div>
                 <label style={labelStyle}>Power (W)</label>
@@ -415,11 +491,18 @@ export default function AssetModal({ asset, onSave, onClose }) {
               </div>
               <div>
                 <label style={labelStyle}>Rack Position (U)</label>
-                <input style={inputStyle} type="number" value={form.u_position} onChange={(e) => set('u_position', e.target.value)} placeholder="e.g. 12" />
+                <input
+                  style={{ ...inputStyle, opacity: form.rack_id ? 1 : 0.5 }}
+                  type="number"
+                  value={form.u_position}
+                  onChange={(e) => set('u_position', e.target.value)}
+                  disabled={!form.rack_id}
+                  placeholder="e.g. 12"
+                />
               </div>
             </div>
             <div style={{ fontSize: '11px', color: '#3a4a5e', marginTop: '8px' }}>
-              Rack assignment (which rack) comes with the rack view. Leave Rack Position blank for gear that's in the room but not mounted.
+              With a rack selected, leave Rack Position blank for gear that's in the room but not physically mounted.
             </div>
           </div>
         )}

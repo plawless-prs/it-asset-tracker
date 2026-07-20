@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '../lib/supabase'
-import { statusColor, formatCurrency, formatDate, computeDepreciation, isComputerType, isRackableType } from '../lib/tracker'
+import { statusColor, formatCurrency, formatDate, computeDepreciation, isComputerType } from '../lib/tracker'
 
 export default function AssetDetail({ asset, onClose, onCheckout, onCheckin, onDispose, onEdit }) {
   const supabase = createClient()
@@ -40,11 +40,12 @@ export default function AssetDetail({ asset, onClose, onCheckout, onCheckin, onD
   ].filter(([, v]) => v)
   const showComputer = isComputerType(asset.type) && computerFields.length > 0
   const rackFields = [
+    ['Rack', asset.rack?.name || null],
     ['Power', asset.watts != null ? `${asset.watts} W` : null],
     ['U-Height', asset.u_height != null ? `${asset.u_height}U` : null],
-    ['Rack Position', asset.u_position != null ? `U${asset.u_position}` : null],
+    ['Rack Position', asset.u_position != null ? `U${asset.u_position}` : (asset.rack?.name ? 'Off-rack' : null)],
   ].filter(([, v]) => v)
-  const showRack = isRackableType(asset.type) && rackFields.length > 0
+  const showRack = (asset.rack_mountable || rackFields.length > 0) && rackFields.length > 0
 
   const btnStyle = {
     padding: '8px 18px',

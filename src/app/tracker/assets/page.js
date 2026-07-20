@@ -26,7 +26,7 @@ export default function AssetsPage() {
   async function loadAssets() {
     const { data, error } = await supabase
       .from('assets')
-      .select('*, employee:employees(full_name), location_obj:locations(name), room:rooms(name)')
+      .select('*, employee:employees(full_name), location_obj:locations(name), room:rooms(name), rack:racks(name)')
       .order('created_at', { ascending: false })
 
     if (data) setAssets(data)

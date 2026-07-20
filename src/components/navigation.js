@@ -30,6 +30,7 @@ export default function Navigation() {
         { href: '/tracker', label: 'Dashboard' },
         { href: '/tracker/assets', label: 'Assets' },
         { href: '/tracker/employees', label: 'Employees' },
+        { href: '/tracker/racks', label: 'Racks' },
         { href: '/tracker/locations', label: 'Locations' },
         { href: '/tracker/licenses', label: 'Licenses' },
         { href: '/tracker/budget', label: 'Budget' },

@@ -65,8 +65,37 @@ export function isComputerType(type) {
   return ASSET_TYPES.find(t => t.value === type)?.computer === true
 }
 
+// Suggested default for the "rack-mountable" checkbox when a type is picked on a
+// new asset. Rack-mountability is ultimately a per-asset flag (see the checkbox
+// in AssetModal), not decided by type — this is only the initial suggestion.
 export function isRackableType(type) {
   return ASSET_TYPES.find(t => t.value === type)?.rackable === true
+}
+
+// Validate placing a device at `uStart` (its bottom U) in a rack. Returns a
+// human-readable error string, or '' if the placement is valid. Shared by
+// AssetModal (on save) and PlaceDeviceModal so both enforce the same rules:
+// within the rack's height and not overlapping another mounted device.
+// `occupied` is the list of devices already in the rack ({ id, name,
+// u_position, u_height }); `excludeId` skips the device being moved/edited.
+export function rackPlacementError({ uStart, uHeight, rackHeight, occupied, excludeId }) {
+  const start = Number(uStart)
+  const h = Number(uHeight) || 1
+  if (!start || start < 1) return 'Pick a rack position (U) of 1 or higher.'
+  if (rackHeight && start + h - 1 > rackHeight) {
+    return `Doesn't fit — a ${h}U device at U${start} would exceed the ${rackHeight}U rack.`
+  }
+  for (const m of occupied || []) {
+    if (excludeId && m.id === excludeId) continue
+    if (m.u_position == null) continue
+    const mStart = m.u_position
+    const mEnd = m.u_position + (m.u_height || 1) - 1
+    const end = start + h - 1
+    if (start <= mEnd && end >= mStart) {
+      return `Overlaps a device already at U${mStart}${mEnd > mStart ? `–U${mEnd}` : ''}${m.name ? ` (${m.name})` : ''}.`
+    }
+  }
+  return ''
 }
 
 // --- Formatters -------------------------------------------------------------
