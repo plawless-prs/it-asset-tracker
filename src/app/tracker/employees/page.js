@@ -1,18 +1,19 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '../../../lib/supabase'
 import EmployeeModal from '../../../components/EmployeeModal'
 
 export default function EmployeesPage() {
   const supabase = createClient()
+  const router = useRouter()
   const [employees, setEmployees] = useState([])
   const [assetCounts, setAssetCounts] = useState({})
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('active')
   const [showAddModal, setShowAddModal] = useState(false)
-  const [editingEmployee, setEditingEmployee] = useState(null)
 
   useEffect(() => {
     loadData()
@@ -36,7 +37,6 @@ export default function EmployeesPage() {
 
   function handleSaved() {
     setShowAddModal(false)
-    setEditingEmployee(null)
     loadData()
   }
 
@@ -141,7 +141,7 @@ export default function EmployeesPage() {
           {filtered.map(emp => (
             <div
               key={emp.id}
-              onClick={() => setEditingEmployee(emp)}
+              onClick={() => router.push(`/tracker/employees/${emp.id}`)}
               style={{
                 display: 'grid', gridTemplateColumns: '1fr 140px 150px 80px 90px',
                 padding: '12px 18px', alignItems: 'center', borderBottom: '1px solid #141d28',
@@ -171,11 +171,11 @@ export default function EmployeesPage() {
         </div>
       )}
 
-      {(showAddModal || editingEmployee) && (
+      {showAddModal && (
         <EmployeeModal
-          employee={editingEmployee}
+          employee={null}
           onSave={handleSaved}
-          onClose={() => { setShowAddModal(false); setEditingEmployee(null) }}
+          onClose={() => setShowAddModal(false)}
         />
       )}
     </div>

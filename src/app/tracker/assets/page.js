@@ -13,6 +13,7 @@ export default function AssetsPage() {
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('All')
   const [searchTerm, setSearchTerm] = useState('')
+  const [groupBy, setGroupBy] = useState('none')
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingAsset, setEditingAsset] = useState(null)
   const [selectedAsset, setSelectedAsset] = useState(null)
@@ -25,7 +26,7 @@ export default function AssetsPage() {
   async function loadAssets() {
     const { data, error } = await supabase
       .from('assets')
-      .select('*, employee:employees(full_name)')
+      .select('*, employee:employees(full_name), location_obj:locations(name), room:rooms(name)')
       .order('created_at', { ascending: false })
 
     if (data) setAssets(data)
@@ -123,6 +124,134 @@ export default function AssetsPage() {
 
   const statuses = ['All', ...ASSET_STATUSES]
 
+  const groupOptions = [
+    { value: 'none', label: 'None' },
+    { value: 'employee', label: 'Employee' },
+    { value: 'location', label: 'Location' },
+  ]
+
+  // Bucket the filtered assets into ordered groups for the current groupBy.
+  // The catch-all bucket (Unassigned / No location) always sorts last.
+  const catchAll = groupBy === 'employee' ? 'Unassigned' : 'No location'
+  function groupKey(a) {
+    if (groupBy === 'employee') return a.employee?.full_name || a.assigned_to || catchAll
+    if (groupBy === 'location') return a.location_obj?.name || a.location || catchAll
+    return ''
+  }
+  const groups = (() => {
+    if (groupBy === 'none') return [{ key: null, rows: filtered }]
+    const map = new Map()
+    for (const a of filtered) {
+      const k = groupKey(a)
+      if (!map.has(k)) map.set(k, [])
+      map.get(k).push(a)
+    }
+    const keys = [...map.keys()].sort((x, y) => {
+      if (x === catchAll) return 1
+      if (y === catchAll) return -1
+      return x.localeCompare(y)
+    })
+    return keys.map(k => ({ key: k, rows: map.get(k) }))
+  })()
+
+  const gridCols = '52px 1fr 120px 120px 130px 100px'
+
+  function renderRow(asset) {
+    const sc = statusColor(asset.status)
+    return (
+      <div
+        key={asset.id}
+        onClick={() => setSelectedAsset(asset)}
+        style={{
+          display: 'grid',
+          gridTemplateColumns: gridCols,
+          padding: '12px 18px',
+          alignItems: 'center',
+          borderBottom: '1px solid #141d28',
+          cursor: 'pointer',
+          fontSize: '13.5px',
+        }}
+        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#111a26'}
+        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+      >
+        {/* Photo thumbnail */}
+        <div>
+          {asset.photo_url ? (
+            <img
+              src={asset.photo_url}
+              alt={asset.name}
+              style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'cover' }}
+            />
+          ) : (
+            <div style={{
+              width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#131a24',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', color: '#3a4a5e',
+            }}>
+              ⊞
+            </div>
+          )}
+        </div>
+
+        {/* Name + Serial */}
+        <div>
+          <div style={{ fontWeight: '600', color: '#d0d8e4' }}>{asset.name}</div>
+          <div style={{ fontSize: '11.5px', color: '#4a5a6e' }}>
+            {asset.type ? `${asset.type} · ` : ''}{asset.serial_number || '—'}
+          </div>
+        </div>
+
+        <span style={{ color: '#6a7e94' }}>{asset.category || '—'}</span>
+        <span style={{ color: '#6a7e94' }}>{asset.employee?.full_name || asset.assigned_to || '—'}</span>
+
+        {/* Status badge */}
+        <span style={{
+          display: 'inline-flex', padding: '4px 12px', borderRadius: '100px',
+          fontSize: '11.5px', fontWeight: '600',
+          backgroundColor: sc.bg, color: sc.text, border: `1px solid ${sc.border}`, width: 'fit-content',
+        }}>
+          {asset.status}
+        </span>
+
+        <span style={{ color: '#8aa0b8' }}>
+          {formatCurrency(asset.purchase_cost, { blankDash: true })}
+        </span>
+      </div>
+    )
+  }
+
+  function renderTable(rows) {
+    return (
+      <div style={{
+        backgroundColor: '#0f1620',
+        border: '1px solid #182030',
+        borderRadius: '14px',
+        overflow: 'hidden',
+      }}>
+        {/* Table Header */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: gridCols,
+          padding: '10px 18px',
+          fontSize: '11px',
+          fontWeight: '600',
+          color: '#4a5a6e',
+          textTransform: 'uppercase',
+          letterSpacing: '0.8px',
+          borderBottom: '1px solid #182030',
+          backgroundColor: '#0c1118',
+        }}>
+          <span></span>
+          <span>Asset</span>
+          <span>Category</span>
+          <span>Assigned To</span>
+          <span>Status</span>
+          <span>Value</span>
+        </div>
+        {rows.map(asset => renderRow(asset))}
+      </div>
+    )
+  }
+
   return (
     <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '28px 24px 60px' }}>
       {/* Header */}
@@ -198,6 +327,31 @@ export default function AssetsPage() {
             {s}
           </button>
         ))}
+
+        {/* Group-by control */}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '11px', color: '#4a5a6e', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+            Group
+          </span>
+          {groupOptions.map(g => (
+            <button
+              key={g.value}
+              onClick={() => setGroupBy(g.value)}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '100px',
+                fontSize: '12px',
+                fontWeight: '500',
+                backgroundColor: groupBy === g.value ? '#111d2e' : 'transparent',
+                color: groupBy === g.value ? '#60a5fa' : '#5a6e84',
+                border: groupBy === g.value ? '1px solid #1e3a5f' : '1px solid #1e2d40',
+                cursor: 'pointer',
+              }}
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Asset Table */}
@@ -221,117 +375,25 @@ export default function AssetsPage() {
               : 'No assets match your search or filter.'}
           </div>
         </div>
+      ) : groupBy === 'none' ? (
+        renderTable(filtered)
       ) : (
-        <div style={{
-          backgroundColor: '#0f1620',
-          border: '1px solid #182030',
-          borderRadius: '14px',
-          overflow: 'hidden',
-        }}>
-          {/* Table Header */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '52px 1fr 120px 120px 130px 100px',
-            padding: '10px 18px',
-            fontSize: '11px',
-            fontWeight: '600',
-            color: '#4a5a6e',
-            textTransform: 'uppercase',
-            letterSpacing: '0.8px',
-            borderBottom: '1px solid #182030',
-            backgroundColor: '#0c1118',
-          }}>
-            <span></span>
-            <span>Asset</span>
-            <span>Category</span>
-            <span>Assigned To</span>
-            <span>Status</span>
-            <span>Value</span>
-          </div>
-
-          {/* Asset Rows */}
-          {filtered.map(asset => {
-            const sc = statusColor(asset.status)
-            return (
-              <div
-                key={asset.id}
-                onClick={() => setSelectedAsset(asset)}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '52px 1fr 120px 120px 130px 100px',
-                  padding: '12px 18px',
-                  alignItems: 'center',
-                  borderBottom: '1px solid #141d28',
-                  cursor: 'pointer',
-                  fontSize: '13.5px',
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#111a26'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-              >
-                {/* Photo thumbnail */}
-                <div>
-                  {asset.photo_url ? (
-                    <img
-                      src={asset.photo_url}
-                      alt={asset.name}
-                      style={{
-                        width: '36px',
-                        height: '36px',
-                        borderRadius: '8px',
-                        objectFit: 'cover',
-                      }}
-                    />
-                  ) : (
-                    <div style={{
-                      width: '36px',
-                      height: '36px',
-                      borderRadius: '8px',
-                      backgroundColor: '#131a24',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '14px',
-                      color: '#3a4a5e',
-                    }}>
-                      ⊞
-                    </div>
-                  )}
-                </div>
-
-                {/* Name + Serial */}
-                <div>
-                  <div style={{ fontWeight: '600', color: '#d0d8e4' }}>
-                    {asset.name}
-                  </div>
-                  <div style={{ fontSize: '11.5px', color: '#4a5a6e' }}>
-                    {asset.serial_number || '—'}
-                  </div>
-                </div>
-
-                <span style={{ color: '#6a7e94' }}>{asset.category || '—'}</span>
-                <span style={{ color: '#6a7e94' }}>{asset.employee?.full_name || asset.assigned_to || '—'}</span>
-
-                {/* Status badge */}
-                <span style={{
-                  display: 'inline-flex',
-                  padding: '4px 12px',
-                  borderRadius: '100px',
-                  fontSize: '11.5px',
-                  fontWeight: '600',
-                  backgroundColor: sc.bg,
-                  color: sc.text,
-                  border: `1px solid ${sc.border}`,
-                  width: 'fit-content',
-                }}>
-                  {asset.status}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {groups.map(group => (
+            <div key={group.key}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px',
+              }}>
+                <span style={{ fontSize: '13px', fontWeight: '700', color: '#c0cad8' }}>
+                  {group.key}
                 </span>
-
-                <span style={{ color: '#8aa0b8' }}>
-                  {formatCurrency(asset.purchase_cost, { blankDash: true })}
+                <span style={{ fontSize: '11.5px', color: '#4a5a6e' }}>
+                  {group.rows.length} asset{group.rows.length === 1 ? '' : 's'}
                 </span>
               </div>
-            )
-          })}
+              {renderTable(group.rows)}
+            </div>
+          ))}
         </div>
       )}
 

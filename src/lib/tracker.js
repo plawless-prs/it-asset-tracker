@@ -41,25 +41,32 @@ export const ASSET_CATEGORIES = [
 // --- Types (finer than category; drives type-specific detail fields) --------
 // `computer: true` => a computer/server, which shows the fuller field set
 // (hostname, IP, OS, CPU, RAM, storage). Everything else shows the leaner set.
+// `rackable: true` => can be mounted in a server rack, so it shows the
+// power/U-height/rack-position fields (and becomes eligible for the Stage 4
+// rack visualization). Laptops/desktops/monitors/phones are not rackable.
 export const ASSET_TYPES = [
-  { value: 'Laptop',        computer: true },
-  { value: 'Desktop',       computer: true },
-  { value: 'Server',        computer: true },
-  { value: 'Switch',        computer: false },
-  { value: 'Router',        computer: false },
-  { value: 'Firewall',      computer: false },
-  { value: 'Storage / NAS', computer: false },
-  { value: 'UPS',           computer: false },
-  { value: 'Monitor',       computer: false },
-  { value: 'Printer',       computer: false },
-  { value: 'Phone / Mobile', computer: false },
-  { value: 'Other',         computer: false },
+  { value: 'Laptop',        computer: true,  rackable: false },
+  { value: 'Desktop',       computer: true,  rackable: false },
+  { value: 'Server',        computer: true,  rackable: true  },
+  { value: 'Switch',        computer: false, rackable: true  },
+  { value: 'Router',        computer: false, rackable: true  },
+  { value: 'Firewall',      computer: false, rackable: true  },
+  { value: 'Storage / NAS', computer: false, rackable: true  },
+  { value: 'UPS',           computer: false, rackable: true  },
+  { value: 'Monitor',       computer: false, rackable: false },
+  { value: 'Printer',       computer: false, rackable: false },
+  { value: 'Phone / Mobile', computer: false, rackable: false },
+  { value: 'Other',         computer: false, rackable: false },
 ]
 
 export const ASSET_TYPE_VALUES = ASSET_TYPES.map(t => t.value)
 
 export function isComputerType(type) {
   return ASSET_TYPES.find(t => t.value === type)?.computer === true
+}
+
+export function isRackableType(type) {
+  return ASSET_TYPES.find(t => t.value === type)?.rackable === true
 }
 
 // --- Formatters -------------------------------------------------------------

@@ -48,10 +48,10 @@ Each app is gated per-user. Current apps: **IT Tracker** (`tracker`), **Material
 
 ## IT Tracker (asset management)
 
-Being fleshed out in stages (see `CHANGELOG.md`; **Stage 0 done**, employees/rack views to come).
+Being fleshed out in stages (see `CHANGELOG.md`; **Stages 0–3 done**, rack views to come).
 
-- Routes under `src/app/tracker/`: dashboard (`/tracker`), assets list (`/tracker/assets`), licenses, budget, history. Guarded once in `src/app/tracker/layout.js` via `hasAccess('tracker')`.
-- Shared helpers live in **`src/lib/tracker.js`** (statuses, categories, asset **types** with a `computer` flag, status colors, `formatCurrency`/`formatDate`, straight-line depreciation) — reuse these instead of re-declaring inline.
+- Routes under `src/app/tracker/`: dashboard (`/tracker`), assets list (`/tracker/assets`, with a Group-by None/Employee/Location control), employees (`/tracker/employees` + detail `/tracker/employees/[id]`), locations (`/tracker/locations` + detail `/tracker/locations/[id]` managing rooms), licenses, budget, history. Guarded once in `src/app/tracker/layout.js` via `hasAccess('tracker')`. Editing an employee happens on the detail page; the list only adds.
+- Shared helpers live in **`src/lib/tracker.js`** (statuses, categories, asset **types** with `computer` + `rackable` flags via `isComputerType()`/`isRackableType()`, status colors, `formatCurrency`/`formatDate`, straight-line depreciation) — reuse these instead of re-declaring inline. `type` drives which detail fields `AssetModal`/`AssetDetail` show (computer specs vs. management URL) and rack eligibility.
 - **Schema:** tracker DDL is committed across numbered migrations starting at `supabase/05_tracker_schema.sql` (the tables predated it and were hand-made, so migrations are idempotent/additive). Tables: `assets`, `employees` (company directory, distinct from app-login `profiles`; `first_name`/`last_name` with `full_name` as the app-written combined value), `locations` → `rooms` (two-level hierarchy; employees/assets/racks carry `location_id` + optional `room_id`), `racks`, plus `licenses/budgets/purchases/subscriptions/audit_log`. Later migrations: `06` (employee name split), `07` (location→room hierarchy).
 - **Asset IDs:** every asset gets an immutable `asset_tag` = `PRS-#####` (global `asset_tag_seq`, auto-assigned via column default). This ID is also the printed asset-tag label.
 - **Rack membership:** a device with `rack_id` + `u_position` is mounted at that U; `rack_id` set with `u_position` NULL = "off-rack" (in the room, not physically racked). Rack total power is derived by summing device `watts`, not stored.

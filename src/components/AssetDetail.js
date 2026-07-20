@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '../lib/supabase'
-import { statusColor, formatCurrency, formatDate, computeDepreciation } from '../lib/tracker'
+import { statusColor, formatCurrency, formatDate, computeDepreciation, isComputerType, isRackableType } from '../lib/tracker'
 
 export default function AssetDetail({ asset, onClose, onCheckout, onCheckin, onDispose, onEdit }) {
   const supabase = createClient()
@@ -27,6 +27,24 @@ export default function AssetDetail({ asset, onClose, onCheckout, onCheckin, onD
   const { pct: depreciationPct, currentValue } = computeDepreciation(asset)
 
   const sc = statusColor(asset.status)
+
+  // Type-aware detail blocks. Show a block when the type calls for it or the row
+  // already carries values (older/legacy rows may predate the type field).
+  const computerFields = [
+    ['Hostname', asset.hostname],
+    ['IP Address', asset.ip_address],
+    ['OS', asset.os],
+    ['CPU', asset.cpu],
+    ['RAM', asset.ram],
+    ['Storage', asset.storage],
+  ].filter(([, v]) => v)
+  const showComputer = isComputerType(asset.type) && computerFields.length > 0
+  const rackFields = [
+    ['Power', asset.watts != null ? `${asset.watts} W` : null],
+    ['U-Height', asset.u_height != null ? `${asset.u_height}U` : null],
+    ['Rack Position', asset.u_position != null ? `U${asset.u_position}` : null],
+  ].filter(([, v]) => v)
+  const showRack = isRackableType(asset.type) && rackFields.length > 0
 
   const btnStyle = {
     padding: '8px 18px',
@@ -120,12 +138,75 @@ export default function AssetDetail({ asset, onClose, onCheckout, onCheckin, onD
           fontSize: '13px',
         }}>
           <div><span style={{ color: '#4a5a6e' }}>Category: </span><span style={{ color: '#8aa0b8' }}>{asset.category}</span></div>
-          <div><span style={{ color: '#4a5a6e' }}>Make/Model: </span><span style={{ color: '#8aa0b8' }}>{asset.make} {asset.model}</span></div>
+          <div><span style={{ color: '#4a5a6e' }}>Type: </span><span style={{ color: '#8aa0b8' }}>{asset.type || '—'}</span></div>
+          <div><span style={{ color: '#4a5a6e' }}>Make/Model: </span><span style={{ color: '#8aa0b8' }}>{[asset.make, asset.model].filter(Boolean).join(' ') || '—'}</span></div>
           <div><span style={{ color: '#4a5a6e' }}>Assigned To: </span><span style={{ color: '#8aa0b8' }}>{asset.employee?.full_name || asset.assigned_to || '—'}</span></div>
-          <div><span style={{ color: '#4a5a6e' }}>Location: </span><span style={{ color: '#8aa0b8' }}>{asset.location || '—'}</span></div>
+          <div><span style={{ color: '#4a5a6e' }}>Location: </span><span style={{ color: '#8aa0b8' }}>{
+            asset.location_obj?.name
+              ? `${asset.location_obj.name}${asset.room?.name ? ` · ${asset.room.name}` : ''}`
+              : (asset.location || '—')
+          }</span></div>
           <div><span style={{ color: '#4a5a6e' }}>Purchase Date: </span><span style={{ color: '#8aa0b8' }}>{formatDate(asset.purchase_date)}</span></div>
           <div><span style={{ color: '#4a5a6e' }}>Warranty: </span><span style={{ color: '#8aa0b8' }}>{formatDate(asset.warranty_expiry)}</span></div>
+          {asset.management_url && (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <span style={{ color: '#4a5a6e' }}>Management: </span>
+              <a
+                href={asset.management_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                style={{ color: '#60a5fa', textDecoration: 'none' }}
+              >
+                {asset.management_url}
+              </a>
+            </div>
+          )}
         </div>
+
+        {/* Computer / server details */}
+        {showComputer && (
+          <div style={{
+            backgroundColor: '#0c1118', borderRadius: '10px', padding: '14px 16px', marginBottom: '16px',
+          }}>
+            <div style={{
+              fontSize: '11px', fontWeight: '600', color: '#5a6e84', textTransform: 'uppercase',
+              letterSpacing: '0.8px', marginBottom: '10px',
+            }}>
+              Computer Details
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: '13px' }}>
+              {computerFields.map(([label, value]) => (
+                <div key={label}>
+                  <span style={{ color: '#4a5a6e' }}>{label}: </span>
+                  <span style={{ color: '#8aa0b8' }}>{value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Rack / power */}
+        {showRack && (
+          <div style={{
+            backgroundColor: '#0c1118', borderRadius: '10px', padding: '14px 16px', marginBottom: '16px',
+          }}>
+            <div style={{
+              fontSize: '11px', fontWeight: '600', color: '#5a6e84', textTransform: 'uppercase',
+              letterSpacing: '0.8px', marginBottom: '10px',
+            }}>
+              Rack / Power
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px 16px', fontSize: '13px' }}>
+              {rackFields.map(([label, value]) => (
+                <div key={label}>
+                  <span style={{ color: '#4a5a6e' }}>{label}: </span>
+                  <span style={{ color: '#8aa0b8' }}>{value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Depreciation */}
         {asset.purchase_cost && (

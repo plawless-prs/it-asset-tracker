@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { createClient } from '../lib/supabase'
-import { ASSET_CATEGORIES, ASSET_STATUSES } from '../lib/tracker'
+import { ASSET_CATEGORIES, ASSET_STATUSES, ASSET_TYPES, isComputerType, isRackableType } from '../lib/tracker'
 
 export default function AssetModal({ asset, onSave, onClose }) {
   const supabase = createClient()
@@ -12,6 +12,7 @@ export default function AssetModal({ asset, onSave, onClose }) {
   const [form, setForm] = useState({
     name: asset?.name || '',
     category: asset?.category || 'Hardware',
+    type: asset?.type || '',
     serial_number: asset?.serial_number || '',
     make: asset?.make || '',
     model: asset?.model || '',
@@ -21,18 +22,38 @@ export default function AssetModal({ asset, onSave, onClose }) {
     warranty_expiry: asset?.warranty_expiry || '',
     useful_life_months: asset?.useful_life_months || '60',
     assigned_employee_id: asset?.assigned_employee_id || '',
-    location: asset?.location || '',
+    location_id: asset?.location_id || '',
+    room_id: asset?.room_id || '',
+    // Computer/server detail fields
+    hostname: asset?.hostname || '',
+    ip_address: asset?.ip_address || '',
+    os: asset?.os || '',
+    cpu: asset?.cpu || '',
+    ram: asset?.ram || '',
+    storage: asset?.storage || '',
+    // Other-device detail field
+    management_url: asset?.management_url || '',
+    // Rack / power fields (rackable types)
+    watts: asset?.watts ?? '',
+    u_height: asset?.u_height ?? '',
+    u_position: asset?.u_position ?? '',
     notes: asset?.notes || '',
     photo_url: asset?.photo_url || '',
   })
+
+  const isComputer = isComputerType(form.type)
+  const isRackable = isRackableType(form.type)
 
   const [photoPreview, setPhotoPreview] = useState(asset?.photo_url || '')
   const [photoFile, setPhotoFile] = useState(null)
   const [saving, setSaving] = useState(false)
   const [employees, setEmployees] = useState([])
+  const [locations, setLocations] = useState([])
+  const [rooms, setRooms] = useState([])
 
-  // Legacy free-text assignee shown as a hint when a row predates the FK.
+  // Legacy free-text values shown as hints when a row predates the FK.
   const legacyAssignedTo = !asset?.assigned_employee_id ? asset?.assigned_to : null
+  const legacyLocation = !asset?.location_id ? asset?.location : null
 
   useEffect(() => {
     supabase
@@ -41,11 +62,28 @@ export default function AssetModal({ asset, onSave, onClose }) {
       .eq('status', 'active')
       .order('full_name')
       .then(({ data }) => { if (data) setEmployees(data) })
+    supabase
+      .from('locations')
+      .select('id, name')
+      .order('name')
+      .then(({ data }) => { if (data) setLocations(data) })
+    supabase
+      .from('rooms')
+      .select('id, name, location_id')
+      .order('name')
+      .then(({ data }) => { if (data) setRooms(data) })
   }, [])
 
   function set(key, value) {
     setForm(prev => ({ ...prev, [key]: value }))
   }
+
+  // Changing branch clears the room (rooms belong to a specific location)
+  function setLocation(locId) {
+    setForm(prev => ({ ...prev, location_id: locId, room_id: '' }))
+  }
+
+  const roomsForLocation = rooms.filter(r => r.location_id === form.location_id)
 
   function handlePhotoSelect(e) {
     const file = e.target.files?.[0]
@@ -86,9 +124,15 @@ export default function AssetModal({ asset, onSave, onClose }) {
       photoUrl = urlData.publicUrl
     }
 
+    // Only persist detail fields that apply to the chosen type, so a row that
+    // changes type doesn't keep stale values (e.g. a Server's hostname left
+    // behind after it's reclassified as a Monitor).
+    const num = (v) => (v === '' || v === null || v === undefined ? null : Number(v))
+
     const record = {
       name: form.name.trim(),
       category: form.category,
+      type: form.type || null,
       serial_number: form.serial_number.trim() || null,
       make: form.make.trim() || null,
       model: form.model.trim() || null,
@@ -102,7 +146,21 @@ export default function AssetModal({ asset, onSave, onClose }) {
       assigned_to: form.assigned_employee_id
         ? (employees.find(e => e.id === form.assigned_employee_id)?.full_name || null)
         : null,
-      location: form.location.trim() || null,
+      location_id: form.location_id || null,
+      room_id: form.room_id || null,
+      // Computer/server fields — kept only for computer types
+      hostname:   isComputer ? (form.hostname.trim() || null) : null,
+      ip_address: isComputer ? (form.ip_address.trim() || null) : null,
+      os:         isComputer ? (form.os.trim() || null) : null,
+      cpu:        isComputer ? (form.cpu.trim() || null) : null,
+      ram:        isComputer ? (form.ram.trim() || null) : null,
+      storage:    isComputer ? (form.storage.trim() || null) : null,
+      // Management URL — other (non-computer) devices only
+      management_url: (form.type && !isComputer) ? (form.management_url.trim() || null) : null,
+      // Rack / power fields — rackable types only
+      watts:      isRackable ? num(form.watts) : null,
+      u_height:   isRackable ? num(form.u_height) : null,
+      u_position: isRackable ? num(form.u_position) : null,
       notes: form.notes.trim() || null,
       photo_url: photoUrl || null,
       updated_at: new Date().toISOString(),
@@ -259,8 +317,13 @@ export default function AssetModal({ asset, onSave, onClose }) {
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
           <div>
-            <label style={labelStyle}>Serial Number</label>
-            <input style={inputStyle} value={form.serial_number} onChange={(e) => set('serial_number', e.target.value)} placeholder="SN-XXXX-XXXX" />
+            <label style={labelStyle}>Type</label>
+            <select style={inputStyle} value={form.type} onChange={(e) => set('type', e.target.value)}>
+              <option value="">— Select type —</option>
+              {ASSET_TYPES.map(t => (
+                <option key={t.value} value={t.value}>{t.value}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label style={labelStyle}>Status</label>
@@ -274,14 +337,92 @@ export default function AssetModal({ asset, onSave, onClose }) {
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
           <div>
-            <label style={labelStyle}>Make</label>
-            <input style={inputStyle} value={form.make} onChange={(e) => set('make', e.target.value)} placeholder="e.g. Apple" />
+            <label style={labelStyle}>{isComputer ? 'Brand' : 'Make'}</label>
+            <input style={inputStyle} value={form.make} onChange={(e) => set('make', e.target.value)} placeholder="e.g. Dell" />
           </div>
           <div>
             <label style={labelStyle}>Model</label>
             <input style={inputStyle} value={form.model} onChange={(e) => set('model', e.target.value)} placeholder="e.g. A2141" />
           </div>
         </div>
+
+        <div style={{ marginBottom: '14px' }}>
+          <label style={labelStyle}>Serial Number</label>
+          <input style={inputStyle} value={form.serial_number} onChange={(e) => set('serial_number', e.target.value)} placeholder="SN-XXXX-XXXX" />
+        </div>
+
+        {/* Computer / server detail fields */}
+        {isComputer && (
+          <div style={{
+            border: '1px solid #182030', borderRadius: '12px', padding: '16px',
+            marginBottom: '14px', backgroundColor: '#0c1118',
+          }}>
+            <div style={{ ...labelStyle, color: '#6a7e94', marginBottom: '12px' }}>Computer Details</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
+              <div>
+                <label style={labelStyle}>Hostname</label>
+                <input style={inputStyle} value={form.hostname} onChange={(e) => set('hostname', e.target.value)} placeholder="e.g. PRS-SRV01" />
+              </div>
+              <div>
+                <label style={labelStyle}>IP Address</label>
+                <input style={inputStyle} value={form.ip_address} onChange={(e) => set('ip_address', e.target.value)} placeholder="e.g. 10.0.0.20" />
+              </div>
+            </div>
+            <div style={{ marginBottom: '14px' }}>
+              <label style={labelStyle}>Operating System</label>
+              <input style={inputStyle} value={form.os} onChange={(e) => set('os', e.target.value)} placeholder="e.g. Windows Server 2022" />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
+              <div>
+                <label style={labelStyle}>CPU</label>
+                <input style={inputStyle} value={form.cpu} onChange={(e) => set('cpu', e.target.value)} placeholder="e.g. Xeon E-2288G" />
+              </div>
+              <div>
+                <label style={labelStyle}>RAM</label>
+                <input style={inputStyle} value={form.ram} onChange={(e) => set('ram', e.target.value)} placeholder="e.g. 64 GB" />
+              </div>
+              <div>
+                <label style={labelStyle}>Storage</label>
+                <input style={inputStyle} value={form.storage} onChange={(e) => set('storage', e.target.value)} placeholder="e.g. 2×1TB SSD" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Management URL — other (non-computer) devices */}
+        {form.type && !isComputer && (
+          <div style={{ marginBottom: '14px' }}>
+            <label style={labelStyle}>Management URL</label>
+            <input style={inputStyle} value={form.management_url} onChange={(e) => set('management_url', e.target.value)} placeholder="https://…" />
+          </div>
+        )}
+
+        {/* Rack / power fields — rackable types */}
+        {isRackable && (
+          <div style={{
+            border: '1px solid #182030', borderRadius: '12px', padding: '16px',
+            marginBottom: '14px', backgroundColor: '#0c1118',
+          }}>
+            <div style={{ ...labelStyle, color: '#6a7e94', marginBottom: '12px' }}>Rack / Power</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
+              <div>
+                <label style={labelStyle}>Power (W)</label>
+                <input style={inputStyle} type="number" value={form.watts} onChange={(e) => set('watts', e.target.value)} placeholder="e.g. 450" />
+              </div>
+              <div>
+                <label style={labelStyle}>U-Height</label>
+                <input style={inputStyle} type="number" value={form.u_height} onChange={(e) => set('u_height', e.target.value)} placeholder="e.g. 2" />
+              </div>
+              <div>
+                <label style={labelStyle}>Rack Position (U)</label>
+                <input style={inputStyle} type="number" value={form.u_position} onChange={(e) => set('u_position', e.target.value)} placeholder="e.g. 12" />
+              </div>
+            </div>
+            <div style={{ fontSize: '11px', color: '#3a4a5e', marginTop: '8px' }}>
+              Rack assignment (which rack) comes with the rack view. Leave Rack Position blank for gear that's in the room but not mounted.
+            </div>
+          </div>
+        )}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
           <div>
@@ -305,26 +446,61 @@ export default function AssetModal({ asset, onSave, onClose }) {
           </div>
         </div>
 
+        <div style={{ marginBottom: '14px' }}>
+          <label style={labelStyle}>Assigned To</label>
+          <select style={inputStyle} value={form.assigned_employee_id} onChange={(e) => set('assigned_employee_id', e.target.value)}>
+            <option value="">— Unassigned —</option>
+            {employees.map(e => (
+              <option key={e.id} value={e.id}>
+                {e.full_name}{e.department ? ` · ${e.department}` : ''}
+              </option>
+            ))}
+          </select>
+          {legacyAssignedTo && (
+            <div style={{ fontSize: '11px', color: '#fbbf24', marginTop: '4px' }}>
+              Was: {legacyAssignedTo} — pick the matching employee to migrate.
+            </div>
+          )}
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
           <div>
-            <label style={labelStyle}>Assigned To</label>
-            <select style={inputStyle} value={form.assigned_employee_id} onChange={(e) => set('assigned_employee_id', e.target.value)}>
-              <option value="">— Unassigned —</option>
-              {employees.map(e => (
-                <option key={e.id} value={e.id}>
-                  {e.full_name}{e.department ? ` · ${e.department}` : ''}
-                </option>
+            <label style={labelStyle}>Location / Branch</label>
+            <select style={inputStyle} value={form.location_id} onChange={(e) => setLocation(e.target.value)}>
+              <option value="">— None —</option>
+              {locations.map(l => (
+                <option key={l.id} value={l.id}>{l.name}</option>
               ))}
             </select>
-            {legacyAssignedTo && (
+            {legacyLocation && (
               <div style={{ fontSize: '11px', color: '#fbbf24', marginTop: '4px' }}>
-                Was: {legacyAssignedTo} — pick the matching employee to migrate.
+                Was: {legacyLocation} — pick the matching branch to migrate.
+              </div>
+            )}
+            {locations.length === 0 && (
+              <div style={{ fontSize: '11px', color: '#fbbf24', marginTop: '4px' }}>
+                No locations yet — add branches on the Locations page.
               </div>
             )}
           </div>
           <div>
-            <label style={labelStyle}>Location</label>
-            <input style={inputStyle} value={form.location} onChange={(e) => set('location', e.target.value)} placeholder="Office / Room" />
+            <label style={labelStyle}>Room</label>
+            <select
+              style={{ ...inputStyle, opacity: form.location_id ? 1 : 0.5 }}
+              value={form.room_id}
+              onChange={(e) => set('room_id', e.target.value)}
+              disabled={!form.location_id}
+            >
+              <option value="">— None —</option>
+              {roomsForLocation.map(r => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </select>
+            {form.location_id && roomsForLocation.length === 0 && (
+              <div style={{ fontSize: '11px', color: '#fbbf24', marginTop: '4px' }}>
+                No rooms for this branch yet — add them on the location page.
+              </div>
+            )}
           </div>
         </div>
 
