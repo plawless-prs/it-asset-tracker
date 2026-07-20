@@ -94,10 +94,25 @@ export default function AssetModal({ asset, defaults, onSave, onClose }) {
   // Picking a type suggests a rack-mountable default for a NEW asset (Server →
   // checked, Monitor → unchecked); on edits we leave the user's choice alone.
   function setType(t) {
+    setForm(prev => {
+      const rackMountable = isEditing ? prev.rack_mountable : isRackableType(t)
+      return {
+        ...prev,
+        type: t,
+        rack_mountable: rackMountable,
+        // Rack-mountable gear isn't assigned to a person — drop any assignment.
+        assigned_employee_id: rackMountable ? '' : prev.assigned_employee_id,
+      }
+    })
+  }
+
+  // Rack-mountable devices are infrastructure, not assigned to a person; toggling
+  // it on clears (and disables) the assignee.
+  function setRackMountable(checked) {
     setForm(prev => ({
       ...prev,
-      type: t,
-      rack_mountable: isEditing ? prev.rack_mountable : isRackableType(t),
+      rack_mountable: checked,
+      assigned_employee_id: checked ? '' : prev.assigned_employee_id,
     }))
   }
 
@@ -191,9 +206,10 @@ export default function AssetModal({ asset, defaults, onSave, onClose }) {
       purchase_date: form.purchase_date || null,
       warranty_expiry: form.warranty_expiry || null,
       useful_life_months: form.useful_life_months ? Number(form.useful_life_months) : 60,
-      assigned_employee_id: form.assigned_employee_id || null,
+      // Rack-mountable gear is infrastructure — never assigned to a person.
+      assigned_employee_id: form.rack_mountable ? null : (form.assigned_employee_id || null),
       // Cached assignee name for list display / search; cleared when unassigned.
-      assigned_to: form.assigned_employee_id
+      assigned_to: (!form.rack_mountable && form.assigned_employee_id)
         ? (employees.find(e => e.id === form.assigned_employee_id)?.full_name || null)
         : null,
       location_id: form.location_id || null,
@@ -461,7 +477,7 @@ export default function AssetModal({ asset, defaults, onSave, onClose }) {
           <input
             type="checkbox"
             checked={form.rack_mountable}
-            onChange={(e) => set('rack_mountable', e.target.checked)}
+            onChange={(e) => setRackMountable(e.target.checked)}
             style={{ width: '16px', height: '16px', accentColor: '#2563eb', cursor: 'pointer' }}
           />
           <span style={{ fontSize: '13px', color: '#c0cad8', fontWeight: '500' }}>
@@ -536,7 +552,12 @@ export default function AssetModal({ asset, defaults, onSave, onClose }) {
 
         <div style={{ marginBottom: '14px' }}>
           <label style={labelStyle}>Assigned To</label>
-          <select style={inputStyle} value={form.assigned_employee_id} onChange={(e) => set('assigned_employee_id', e.target.value)}>
+          <select
+            style={{ ...inputStyle, opacity: form.rack_mountable ? 0.45 : 1, cursor: form.rack_mountable ? 'not-allowed' : 'pointer' }}
+            value={form.assigned_employee_id}
+            onChange={(e) => set('assigned_employee_id', e.target.value)}
+            disabled={form.rack_mountable}
+          >
             <option value="">— Unassigned —</option>
             {employees.map(e => (
               <option key={e.id} value={e.id}>
@@ -544,7 +565,11 @@ export default function AssetModal({ asset, defaults, onSave, onClose }) {
               </option>
             ))}
           </select>
-          {legacyAssignedTo && (
+          {form.rack_mountable ? (
+            <div style={{ fontSize: '11px', color: '#5a6e84', marginTop: '4px' }}>
+              Rack-mountable devices are infrastructure and aren't assigned to a person.
+            </div>
+          ) : legacyAssignedTo && (
             <div style={{ fontSize: '11px', color: '#fbbf24', marginTop: '4px' }}>
               Was: {legacyAssignedTo} — pick the matching employee to migrate.
             </div>

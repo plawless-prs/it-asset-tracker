@@ -301,7 +301,8 @@ export default function AssetDetail({ asset, onClose, onCheckout, onCheckin, onD
 
         {/* Action Buttons */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          {asset.status !== 'Disposed' && asset.status !== 'Deployed' && (
+          {/* Rack-mountable gear is infrastructure — not checked out to a person. */}
+          {!asset.rack_mountable && asset.status !== 'Disposed' && asset.status !== 'Deployed' && (
             <button style={btnStyle} onClick={() => onCheckout(asset)}>
               Check Out
             </button>
