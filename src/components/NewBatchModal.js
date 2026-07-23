@@ -14,6 +14,7 @@ export default function NewBatchModal({ onClose, onCreated }) {
   const [vendorId, setVendorId] = useState('')
   const [newVendorName, setNewVendorName] = useState('')
   const [creatingVendor, setCreatingVendor] = useState(false)
+  const [effectiveDate, setEffectiveDate] = useState('')
   const [files, setFiles] = useState([])
   const [dragOver, setDragOver] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -67,7 +68,7 @@ export default function NewBatchModal({ onClose, onCreated }) {
       // 2. Create the batch.
       const { data: batch, error: bErr } = await supabase
         .from('pu_batches')
-        .insert({ vendor_id: resolvedVendorId, source: 'upload', status: 'received' })
+        .insert({ vendor_id: resolvedVendorId, source: 'upload', status: 'received', effective_date: effectiveDate || null })
         .select('id, number')
         .single()
       if (bErr) throw bErr
@@ -164,6 +165,20 @@ export default function NewBatchModal({ onClose, onCreated }) {
               </button>
             </>
           )}
+        </div>
+
+        {/* Effective date — one date for the whole batch */}
+        <div style={{ marginBottom: '18px' }}>
+          <label style={labelStyle}>Effective date <span style={{ color: '#5a6e84', fontWeight: '400', textTransform: 'none', letterSpacing: 0 }}>(optional)</span></label>
+          <input
+            type="date"
+            style={{ ...inputStyle, colorScheme: 'dark' }}
+            value={effectiveDate}
+            onChange={(e) => setEffectiveDate(e.target.value)}
+          />
+          <div style={{ fontSize: '11.5px', color: '#5a6e84', marginTop: '5px' }}>
+            When these prices take effect. Can be left blank and set later.
+          </div>
         </div>
 
         {/* Drop zone */}

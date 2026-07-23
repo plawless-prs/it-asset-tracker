@@ -105,3 +105,124 @@ export function formatPct(n) {
   const v = Number(n)
   return `${v > 0 ? '+' : ''}${v.toFixed(1)}%`
 }
+
+// --- Parsing / column mapping (Phase 2) -------------------------------------
+// The target fields a spreadsheet column can be mapped to. `key` matches both
+// the parse-profile `columns` config keys and (mostly) the pu_lines columns.
+// Effective date is NOT here — it's set once at batch creation (one date per
+// batch), not mapped per line. buildLinesFromRows() still honors an
+// effective_date column if a config supplies one, so per-line dates remain
+// possible later without a code change.
+export const MAPPING_FIELDS = [
+  { key: 'vendor_item_no', label: 'Vendor item #', required: true },
+  { key: 'description',    label: 'Description' },
+  { key: 'uom',            label: 'UOM' },
+  { key: 'cost',           label: 'Cost' },
+  { key: 'list',           label: 'List' },
+]
+
+// Defensive numeric parse: strips $, commas, spaces, and accounting parens.
+// Blank / non-numeric returns null (blank is NOT zero).
+export function parseNumber(v) {
+  if (v === null || v === undefined) return null
+  let s = String(v).trim()
+  if (s === '') return null
+  const negative = /^\(.*\)$/.test(s)          // (123.45) = -123.45
+  s = s.replace(/[(),$\s]/g, '')               // drop parens, commas, $, whitespace
+  s = s.replace(/[^0-9.\-]/g, '')              // drop any other stray currency/unit chars
+  if (s === '' || s === '-' || s === '.') return null
+  const n = Number(s)
+  if (isNaN(n)) return null
+  return negative ? -n : n
+}
+
+// Best-effort date parse -> 'YYYY-MM-DD' (or null). Cells arrive already
+// formatted (the parse route reads with raw:false), so most vendor date strings
+// parse cleanly; anything ambiguous is left null rather than guessed wrong.
+export function parseDateish(v) {
+  if (v === null || v === undefined) return null
+  const s = String(v).trim()
+  if (s === '') return null
+  const d = new Date(s)
+  if (isNaN(d.getTime())) return null
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function textOrNull(v) {
+  if (v === null || v === undefined) return null
+  const s = String(v).trim()
+  return s === '' ? null : s
+}
+
+function isBlankRow(row) {
+  return !row || row.every(c => c === null || c === undefined || String(c).trim() === '')
+}
+
+// Turn a sheet's 2-D rows into pu_lines-shaped objects using a mapping config:
+//   { sheet, header_row, skip_rows, columns:{field->colIndex}, transforms }
+// transforms: { multiplier, discount_pct, strip_prefix }
+//   - discount_pct: net cost = list * (1 - pct/100), used only when no cost column
+//   - multiplier:   net cost = cost * multiplier
+//   - strip_prefix: removed from the start of vendor_item_no
+// Returns { lines, skippedNoPrice, dataRows }. Lines with no usable price
+// (both cost and list null) are skipped and counted — blank is not zero.
+export function buildLinesFromRows(rows, config = {}) {
+  const cols = config.columns || {}
+  const t = config.transforms || {}
+  const headerRow = Number.isInteger(config.header_row) ? config.header_row : -1
+  const skip = Number(config.skip_rows) || 0
+  const startIdx = (headerRow >= 0 ? headerRow + 1 : 0) + skip
+
+  const cellOf = (row, key) => {
+    const idx = cols[key]
+    if (idx === undefined || idx === null || idx === '') return null
+    const v = row[Number(idx)]
+    return v === undefined ? null : v
+  }
+
+  const discount = parseNumber(t.discount_pct)
+  const mult = parseNumber(t.multiplier)
+  const prefix = t.strip_prefix ? String(t.strip_prefix) : ''
+
+  const lines = []
+  let skippedNoPrice = 0
+
+  for (let i = startIdx; i < rows.length; i++) {
+    const row = rows[i] || []
+    if (isBlankRow(row)) continue
+
+    let vendorItem = textOrNull(cellOf(row, 'vendor_item_no'))
+    if (prefix && vendorItem && vendorItem.startsWith(prefix)) {
+      vendorItem = vendorItem.slice(prefix.length).trim() || null
+    }
+
+    let newCost = parseNumber(cellOf(row, 'cost'))
+    let newList = parseNumber(cellOf(row, 'list'))
+
+    if (newCost === null && discount !== null && newList !== null) {
+      newCost = newList * (1 - discount / 100)
+    }
+    if (mult !== null && newCost !== null) newCost = newCost * mult
+
+    if (newCost !== null) newCost = Math.round(newCost * 10000) / 10000
+    if (newList !== null) newList = Math.round(newList * 10000) / 10000
+
+    if (newCost === null && newList === null) { skippedNoPrice++; continue }
+
+    lines.push({
+      row_number: i + 1,
+      raw: row,
+      vendor_item_no: vendorItem,
+      description: textOrNull(cellOf(row, 'description')),
+      uom: textOrNull(cellOf(row, 'uom')),
+      new_cost: newCost,
+      new_list: newList,
+      effective_date: parseDateish(cellOf(row, 'effective_date')),
+    })
+  }
+
+  return { lines, skippedNoPrice, dataRows: Math.max(0, rows.length - startIdx) }
+}

@@ -1,57 +1,91 @@
 'use client'
 
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { createClient } from '../../../../lib/supabase'
+import { useRole } from '../../../../lib/useRole'
 import {
-  BATCH_STATUS_META, SOURCE_META, formatDate, relativeTime,
+  BATCH_STATUS_META, SOURCE_META, MATCH_META,
+  formatCurrency, formatDate, relativeTime,
 } from '../../../../lib/priceupdates'
+import { fetchParsedSheets, applyParse } from '../../../../lib/priceupdatesParse'
 
-// Phase 1: minimal batch detail — header, properties, and the attached files.
-// The full two-pane review UI (line grid + inline edit + approve) lands in Phase 4.
+const SPREADSHEET = /\.(xlsx|xls|csv)$/i
+
+// Phase 1: header + files. Phase 2 adds the parse actions (map / auto-parse)
+// and a read-only preview of the parsed lines. The full two-pane editable
+// review grid + approve flow lands in Phase 4.
 export default function BatchDetail() {
   const supabase = createClient()
+  const router = useRouter()
   const { id } = useParams()
+  const { user } = useRole()
   const [batch, setBatch] = useState(null)
   const [files, setFiles] = useState([])
+  const [lines, setLines] = useState([])
+  const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
+  const [busyFile, setBusyFile] = useState(null)
+  const [error, setError] = useState('')
 
-  useEffect(() => {
-    async function load() {
-      const { data: b } = await supabase
-        .from('pu_batches')
-        .select('*, vendor:vendor_id(id, name)')
-        .eq('id', id)
-        .single()
-      setBatch(b)
-      const { data: f } = await supabase
-        .from('pu_batch_files')
-        .select('id, file_name, file_size, storage_path, parse_status, created_at')
-        .eq('batch_id', id)
-        .order('created_at')
-      setFiles(f || [])
-      setLoading(false)
+  async function load() {
+    const { data: b } = await supabase
+      .from('pu_batches').select('*, vendor:vendor_id(id, name)').eq('id', id).single()
+    setBatch(b)
+    const { data: f } = await supabase
+      .from('pu_batch_files')
+      .select('id, file_name, file_size, storage_path, parse_status, parsed_rows, parse_profile_id, error, created_at')
+      .eq('batch_id', id).order('created_at')
+    setFiles(f || [])
+    const { data: l } = await supabase
+      .from('pu_lines')
+      .select('id, vendor_item_no, description, uom, new_cost, new_list, effective_date, match_status')
+      .eq('batch_id', id).order('row_number').limit(500)
+    setLines(l || [])
+    if (b?.vendor_id) {
+      const { data: p } = await supabase
+        .from('pu_parse_profiles').select('id, label, config, created_at')
+        .eq('vendor_id', b.vendor_id).order('created_at', { ascending: false })
+      setProfiles(p || [])
+    } else {
+      setProfiles([])
     }
-    load()
-  }, [id])
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [id])
 
   async function downloadFile(f) {
-    const { data, error } = await supabase.storage.from('price-files').createSignedUrl(f.storage_path, 60)
-    if (error) return alert('Error: ' + error.message)
+    const { data, error: e } = await supabase.storage.from('price-files').createSignedUrl(f.storage_path, 60)
+    if (e) return alert('Error: ' + e.message)
     window.open(data.signedUrl, '_blank')
   }
 
-  if (loading) {
-    return <div style={{ padding: '48px', textAlign: 'center', color: '#5a6e84' }}>Loading…</div>
+  // One-click auto-parse using the vendor's most recent saved profile.
+  async function autoParse(f) {
+    setError('')
+    setBusyFile(f.id)
+    try {
+      const res = await fetchParsedSheets(supabase, f.id)
+      await applyParse(supabase, {
+        batch, file: f, sheets: res.sheets, config: profiles[0].config,
+        userId: user?.id, saveProfile: null,
+      })
+      await load()
+    } catch (e) {
+      setError(`Auto-parse failed for ${f.file_name}: ${e.message}. Try mapping the columns manually.`)
+    } finally {
+      setBusyFile(null)
+    }
   }
-  if (!batch) {
-    return (
-      <div style={{ padding: '48px', textAlign: 'center', color: '#5a6e84' }}>
-        Batch not found. <Link href="/priceupdates/batches" style={{ color: '#60a5fa' }}>Back to batches</Link>
-      </div>
-    )
-  }
+
+  if (loading) return <div style={{ padding: '48px', textAlign: 'center', color: '#5a6e84' }}>Loading…</div>
+  if (!batch) return (
+    <div style={{ padding: '48px', textAlign: 'center', color: '#5a6e84' }}>
+      Batch not found. <Link href="/priceupdates/batches" style={{ color: '#60a5fa' }}>Back to batches</Link>
+    </div>
+  )
 
   const status = BATCH_STATUS_META[batch.status] || BATCH_STATUS_META.received
   const src = SOURCE_META[batch.source] || {}
@@ -60,7 +94,7 @@ export default function BatchDetail() {
   const valueStyle = { fontSize: '13.5px', color: '#c0cad8', marginBottom: '14px' }
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: '900px' }}>
+    <div style={{ padding: '24px 28px', maxWidth: '1000px' }}>
       <Link href="/priceupdates/batches" style={{ fontSize: '12.5px', color: '#5a6e84', textDecoration: 'none' }}>
         ← Batches
       </Link>
@@ -80,6 +114,12 @@ export default function BatchDetail() {
           backgroundColor: status.pillBg, color: status.pillText,
         }}>{status.label}</span>
       </div>
+
+      {error && (
+        <div style={{ padding: '12px 16px', borderRadius: '10px', marginBottom: '16px', fontSize: '12.5px', backgroundColor: '#330d0d', color: '#f87171', border: '1px solid #991b1b' }}>
+          {error}
+        </div>
+      )}
 
       <div style={{
         backgroundColor: '#0f1620', border: '1px solid #182030', borderRadius: '14px',
@@ -104,8 +144,8 @@ export default function BatchDetail() {
         </div>
       </div>
 
-      {/* Files */}
-      <div style={{ backgroundColor: '#0f1620', border: '1px solid #182030', borderRadius: '14px', padding: '20px' }}>
+      {/* Files + parse actions */}
+      <div style={{ backgroundColor: '#0f1620', border: '1px solid #182030', borderRadius: '14px', padding: '20px', marginBottom: '16px' }}>
         <div style={{ fontSize: '13px', fontWeight: '600', color: '#c0cad8', marginBottom: '14px' }}>
           Files ({files.length})
         </div>
@@ -113,33 +153,103 @@ export default function BatchDetail() {
           <div style={{ fontSize: '13px', color: '#4a5a6e' }}>No files attached.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {files.map(f => (
-              <div key={f.id} style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px',
-                padding: '10px 14px', backgroundColor: '#131a24', border: '1px solid #182030', borderRadius: '10px',
-              }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: '13px', color: '#d0d8e4', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {f.file_name}
+            {files.map(f => {
+              const isSheet = SPREADSHEET.test(f.file_name)
+              const parsed = f.parse_status === 'parsed'
+              const busy = busyFile === f.id
+              return (
+                <div key={f.id} style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px',
+                  padding: '12px 14px', backgroundColor: '#131a24', border: '1px solid #182030', borderRadius: '10px',
+                }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', color: '#d0d8e4', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {f.file_name}
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: parsed ? '#4ade80' : '#5a6e84' }}>
+                      {f.file_size ? `${(f.file_size / 1024).toFixed(0)} KB · ` : ''}
+                      {parsed ? `parsed · ${f.parsed_rows} lines` : f.parse_status}
+                      {f.error ? ` · ${f.error}` : ''}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '11.5px', color: '#5a6e84' }}>
-                    {f.file_size ? `${(f.file_size / 1024).toFixed(0)} KB · ` : ''}{f.parse_status}
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+                    {isSheet && !parsed && profiles.length > 0 && (
+                      <button onClick={() => autoParse(f)} disabled={busy} style={btnPrimary(busy)}>
+                        {busy ? 'Parsing…' : `Auto-parse (${profiles[0].label})`}
+                      </button>
+                    )}
+                    {isSheet && (
+                      <Link href={`/priceupdates/batches/${id}/map?file=${f.id}`} style={btnGhostLink}>
+                        {parsed ? 'Re-map' : 'Map columns →'}
+                      </Link>
+                    )}
+                    {!isSheet && (
+                      <span style={{ fontSize: '11.5px', color: '#5a6e84' }}>Manual entry (later phase)</span>
+                    )}
+                    <button onClick={() => downloadFile(f)} style={btnGhost}>Download</button>
                   </div>
                 </div>
-                <button onClick={() => downloadFile(f)} style={{
-                  padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '500',
-                  backgroundColor: '#1e2a3a', color: '#60a5fa', border: '1px solid #1e40af', cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}>Download</button>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
 
-      <div style={{ marginTop: '16px', fontSize: '12.5px', color: '#4a5a6e' }}>
-        Parsing, matching, and the review grid arrive in later phases.
-      </div>
+      {/* Parsed lines preview (read-only; editable grid comes in Phase 4) */}
+      {lines.length > 0 && (
+        <div style={{ backgroundColor: '#0f1620', border: '1px solid #182030', borderRadius: '14px', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 18px', borderBottom: '1px solid #182030' }}>
+            <div style={{ fontSize: '13px', fontWeight: '600', color: '#c0cad8' }}>Parsed lines</div>
+            <div style={{ fontSize: '12px', color: '#5a6e84' }}>{batch.line_count || lines.length} total{lines.length >= 500 ? ' · showing first 500' : ''}</div>
+          </div>
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 2fr 70px 110px 110px 110px', gap: '10px',
+            padding: '10px 18px', borderBottom: '1px solid #182030', fontSize: '11px',
+            color: '#5a6e84', textTransform: 'uppercase', letterSpacing: '0.05em',
+          }}>
+            <div>Item #</div><div>Description</div><div>UOM</div><div>Cost</div><div>List</div><div>Match</div>
+          </div>
+          <div style={{ maxHeight: '440px', overflow: 'auto' }}>
+            {lines.map(l => {
+              const m = MATCH_META[l.match_status] || MATCH_META.unmatched
+              return (
+                <div key={l.id} style={{
+                  display: 'grid', gridTemplateColumns: '1fr 2fr 70px 110px 110px 110px', gap: '10px',
+                  padding: '9px 18px', borderBottom: '1px solid #131c28', alignItems: 'center', fontSize: '12.5px',
+                }}>
+                  <div style={{ color: '#d0d8e4', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.vendor_item_no || '—'}</div>
+                  <div style={{ color: '#8aa0b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.description || '—'}</div>
+                  <div style={{ color: '#8aa0b8' }}>{l.uom || '—'}</div>
+                  <div style={{ color: '#c0cad8' }}>{formatCurrency(l.new_cost)}</div>
+                  <div style={{ color: '#8aa0b8' }}>{formatCurrency(l.new_list)}</div>
+                  <div>
+                    <span style={{ padding: '2px 8px', borderRadius: '999px', fontSize: '10.5px', fontWeight: '600', backgroundColor: m.pillBg, color: m.pillText }}>{m.label}</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {lines.length === 0 && files.some(f => SPREADSHEET.test(f.file_name)) && (
+        <div style={{ fontSize: '12.5px', color: '#4a5a6e' }}>
+          No lines yet — parse a file above to extract price lines. Matching against P21 comes in a later phase.
+        </div>
+      )}
     </div>
   )
 }
+
+function btnPrimary(busy) {
+  return {
+    padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '600',
+    backgroundColor: busy ? '#1e40af' : '#2563eb', color: '#fff', border: 'none',
+    cursor: busy ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap',
+  }
+}
+const btnGhost = {
+  padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '500',
+  backgroundColor: '#1e2a3a', color: '#60a5fa', border: '1px solid #1e40af', cursor: 'pointer', whiteSpace: 'nowrap',
+}
+const btnGhostLink = { ...btnGhost, textDecoration: 'none', display: 'inline-block' }
