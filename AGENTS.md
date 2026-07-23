@@ -19,7 +19,7 @@ Record **notable** changes (new features, schema/infra changes, behavior changes
 
 ## The apps
 
-Each app is gated per-user. Current apps: **IT Tracker** (`tracker`), **Material Calculator** (`calculator`), **Help Desk** (`helpdesk`), **Daily Ops** (`dailyops`, planned). The **Invoice Processor** (`invoices`) is being retired (see `docs/deprecation-checklist.md`).
+Each app is gated per-user. Current apps: **IT Tracker** (`tracker`), **Material Calculator** (`calculator`), **Help Desk** (`helpdesk`), **Price Update Processor** (`priceupdates`, being built in phases — see `price-update-processor/build-spec.md`), **Daily Ops** (`dailyops`, planned). The **Invoice Processor** (`invoices`) is being retired (see `docs/deprecation-checklist.md`).
 
 ## Auth, roles & per-app access (important, easy to get wrong)
 
@@ -58,6 +58,17 @@ Being fleshed out in stages (see `CHANGELOG.md`; **Stages 0–5 done**, label pr
 - **Asset IDs:** every asset gets an immutable `asset_tag` = `PRS-#####` (global `asset_tag_seq`, auto-assigned via column default). This ID is also the printed asset-tag label.
 - **Rack membership:** a `rack_mountable` device with `rack_id` + `u_position` is mounted at that U; `rack_id` set with `u_position` NULL = "off-rack" (in the room, not physically racked). Placement is validated (fit + no overlap) via `rackPlacementError()`. Rack total power is derived by summing device `watts`, not stored.
 - `assigned_employee_id` (FK → `employees`) is the real assignment; the legacy free-text `assigned_to` is retained until Stage 1 migrates the UI.
+
+## Price Update Processor (`priceupdates`) — in progress
+
+Replaces the retired Invoice Processor's price-update duty; first app to integrate with Prophet 21 (P21). Full brief + phased plan in `price-update-processor/build-spec.md`. **Being built in phases — Phase 1 done** (parsing, P21 matching, review/approve, export, and email intake are still to come).
+
+- Vendors email price/cost updates to `priceupdate@`. The app is a pipeline: **intake → parse → match against a P21 item mirror → review/approve with guardrails → export a P21-ready import file**. A human loads the file into P21's import tool and marks it applied — **v1 does not write to P21**.
+- Routes under `src/app/priceupdates/`: dashboard (`/priceupdates`), batch queue (`/priceupdates/batches` + detail `/priceupdates/batches/[id]`), vendors, settings. Guarded once in `src/app/priceupdates/layout.js` via `hasAccess('priceupdates')` (Help Desk-style icon rail). App id defaults **off** except the owner.
+- **Batch lifecycle:** `received → parsing → needs_review → approved → exported → applied` (+ `failed`, `archived`). Status is the workflow; the queue also shows a **derived attention pill** (unmatched/flagged/awaiting-load) computed from line counts — same status-vs-derived-state idea as Help Desk SLA pills. Helper: `attentionPill()` in `src/lib/priceupdates.js` (status/source/match/flag meta + formatters live there too).
+- **Schema:** migration `supabase/10_priceupdates_schema.sql` — `pu_vendors`, `pu_parse_profiles`, `pu_batches`, `pu_batch_files`, `pu_lines`, `p21_item_mirror` (read-only mirror, written by the Phase-3 sync cron), `pu_exports`, `pu_settings` (single-row guardrail config). All `pu_*` PKs are `uuid`. Private Storage bucket **`price-files`** holds inbound files + generated exports.
+- **RLS helper (reusable):** `has_app_access(app text)` = `is_agent() OR profiles.app_access ? app`. Every `pu_*` table's policy is `has_app_access('priceupdates')`; the P21 mirror is user-read-only (service role writes it). Reuse `has_app_access()` for future per-app-gated tables instead of the older blanket `using(true)`.
+- The P21 client (`lib/p21.js`), its env vars, and the sync cron land in Phase 3 — this section gets expanded then.
 
 ## Environment variables
 

@@ -2,6 +2,10 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-07-23
+
+- **Price Update Processor — Phase 1 (new app `priceupdates`):** first slice of the app that replaces the retired Invoice Processor's price-update duty and will integrate with Prophet 21. Migration `10_priceupdates_schema.sql` adds the full data model (`pu_vendors`, `pu_parse_profiles`, `pu_batches`, `pu_batch_files`, `pu_lines`, `p21_item_mirror`, `pu_exports`, `pu_settings` + 5 enums), RLS via a new `has_app_access(app)` SQL helper (`is_agent()` OR `app_access ? app`), the private `price-files` Storage bucket + policies, and seed vendors + a sample batch. New app id `priceupdates` (default **off** for everyone except the owner) registered in nav/home/admin and guarded once in `src/app/priceupdates/layout.js` (Help Desk-style icon rail: Dashboard, Batches, Vendors, Settings). Dashboard (metric cards + recent batches), batch queue (`/priceupdates/batches`, status + attention pills, filters), a **New batch** modal (pick/create vendor + drag-drop files → `pu_batches`/`pu_batch_files`, status `received`), and a minimal batch detail page (header + attached files). Shared helpers in `src/lib/priceupdates.js`. Parsing, P21 matching, review/approve, export, and email intake come in later phases. **Run `10` in the Supabase SQL Editor to apply.**
+
 ## 2026-07-20
 
 - **IT Tracker — rack-mountable assets aren't assignable:** in `AssetModal`, checking **Rack-mountable** now greys out/disables the **Assigned To** picker and clears any assignee (rack gear is infrastructure, not assigned to a person); the save always nulls `assigned_employee_id`/`assigned_to` for rack-mountable assets. The **Check Out** button in `AssetDetail` is also hidden for rack-mountable assets to close the other assignment path.

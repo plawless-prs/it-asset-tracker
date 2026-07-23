@@ -197,6 +197,7 @@ export default function AdminPage() {
     { id: 'invoices', label: 'Invoice Processor' },
     { id: 'calculator', label: 'Material Calculator' },
     { id: 'helpdesk', label: 'Help Desk' },
+    { id: 'priceupdates', label: 'Price Updates' },
     { id: 'dailyops', label: 'Daily Ops' },
   ]
 
