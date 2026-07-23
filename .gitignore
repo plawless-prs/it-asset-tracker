@@ -41,3 +41,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 azure_application_id.txt
+
+# Price Update Processor — real vendor/P21 data (confidential cost data) stays
+# local, never committed. Only the README (format spec) is tracked.
+price-update-processor/samples/*
+!price-update-processor/samples/README.md
+price-update-processor/history/
