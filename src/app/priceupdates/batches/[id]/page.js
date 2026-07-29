@@ -6,10 +6,10 @@ import { useEffect, useState } from 'react'
 import { createClient } from '../../../../lib/supabase'
 import { useRole } from '../../../../lib/useRole'
 import {
-  BATCH_STATUS_META, SOURCE_META, MATCH_META,
-  formatCurrency, formatDate, relativeTime,
+  BATCH_STATUS_META, SOURCE_META, MATCH_META, FLAG_META,
+  formatCurrency, formatDate, formatPct, relativeTime,
 } from '../../../../lib/priceupdates'
-import { fetchParsedSheets, applyParse } from '../../../../lib/priceupdatesParse'
+import { fetchParsedSheets, applyParse, triggerMatch } from '../../../../lib/priceupdatesParse'
 
 const SPREADSHEET = /\.(xlsx|xls|csv)$/i
 
@@ -27,6 +27,8 @@ export default function BatchDetail() {
   const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [busyFile, setBusyFile] = useState(null)
+  const [matching, setMatching] = useState(false)
+  const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
 
   async function load() {
@@ -40,7 +42,7 @@ export default function BatchDetail() {
     setFiles(f || [])
     const { data: l } = await supabase
       .from('pu_lines')
-      .select('id, vendor_item_no, description, uom, new_cost, new_list, effective_date, match_status')
+      .select('id, vendor_item_no, description, uom, old_cost, new_cost, new_list, cost_change_pct, effective_date, match_status, flag')
       .eq('batch_id', id).order('row_number').limit(500)
     setLines(l || [])
     if (b?.vendor_id) {
@@ -72,11 +74,32 @@ export default function BatchDetail() {
         batch, file: f, sheets: res.sheets, config: profiles[0].config,
         userId: user?.id, saveProfile: null,
       })
+      try { await triggerMatch(supabase, batch.id) } catch { /* matching is best-effort */ }
       await load()
     } catch (e) {
       setError(`Auto-parse failed for ${f.file_name}: ${e.message}. Try mapping the columns manually.`)
     } finally {
       setBusyFile(null)
+    }
+  }
+
+  // Re-run the P21 matching pass (re-runnable, non-destructive to include flags).
+  async function rematch() {
+    setError(''); setNotice('')
+    setMatching(true)
+    try {
+      const r = await triggerMatch(supabase, id)
+      const bits = [`${r.matched}/${r.total} matched`]
+      if (r.ambiguous) bits.push(`${r.ambiguous} ambiguous`)
+      if (r.flagged) bits.push(`${r.flagged} flagged`)
+      if (r.warning) bits.push(r.warning)
+      else if (!r.mirror_rows) bits.push('P21 mirror is empty — sync it in Settings')
+      setNotice(bits.join(' · '))
+      await load()
+    } catch (e) {
+      setError(`Matching failed: ${e.message}`)
+    } finally {
+      setMatching(false)
     }
   }
 
@@ -109,12 +132,26 @@ export default function BatchDetail() {
             {batch.vendor?.name || 'Unidentified vendor'} · received {relativeTime(batch.received_at)}
           </p>
         </div>
-        <span style={{
-          padding: '4px 12px', borderRadius: '999px', fontSize: '12px', fontWeight: '600',
-          backgroundColor: status.pillBg, color: status.pillText,
-        }}>{status.label}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {lines.length > 0 && (
+            <button onClick={rematch} disabled={matching} style={{
+              padding: '7px 14px', borderRadius: '8px', fontSize: '12.5px', fontWeight: '600',
+              backgroundColor: matching ? '#1a2433' : '#131a24', color: matching ? '#5a6e84' : '#60a5fa',
+              border: '1px solid #1e3a5f', cursor: matching ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap',
+            }}>{matching ? 'Matching…' : '↻ Re-run matching'}</button>
+          )}
+          <span style={{
+            padding: '4px 12px', borderRadius: '999px', fontSize: '12px', fontWeight: '600',
+            backgroundColor: status.pillBg, color: status.pillText,
+          }}>{status.label}</span>
+        </div>
       </div>
 
+      {notice && (
+        <div style={{ padding: '12px 16px', borderRadius: '10px', marginBottom: '16px', fontSize: '12.5px', backgroundColor: '#13202e', color: '#7fb4f5', border: '1px solid #1e3a5f' }}>
+          {notice}
+        </div>
+      )}
       {error && (
         <div style={{ padding: '12px 16px', borderRadius: '10px', marginBottom: '16px', fontSize: '12.5px', backgroundColor: '#330d0d', color: '#f87171', border: '1px solid #991b1b' }}>
           {error}
@@ -202,32 +239,43 @@ export default function BatchDetail() {
             <div style={{ fontSize: '13px', fontWeight: '600', color: '#c0cad8' }}>Parsed lines</div>
             <div style={{ fontSize: '12px', color: '#5a6e84' }}>{batch.line_count || lines.length} total{lines.length >= 500 ? ' · showing first 500' : ''}</div>
           </div>
+          <div style={{ overflowX: 'auto' }}>
           <div style={{
-            display: 'grid', gridTemplateColumns: '1fr 2fr 70px 110px 110px 110px', gap: '10px',
+            display: 'grid', gridTemplateColumns: LINE_GRID, gap: '10px', minWidth: '760px',
             padding: '10px 18px', borderBottom: '1px solid #182030', fontSize: '11px',
             color: '#5a6e84', textTransform: 'uppercase', letterSpacing: '0.05em',
           }}>
-            <div>Item #</div><div>Description</div><div>UOM</div><div>Cost</div><div>List</div><div>Match</div>
+            <div>Item #</div><div>Description</div><div>Old cost</div><div>New cost</div><div>Δ%</div><div>Flag</div><div>Match</div>
           </div>
-          <div style={{ maxHeight: '440px', overflow: 'auto' }}>
+          <div style={{ maxHeight: '440px', overflowY: 'auto' }}>
             {lines.map(l => {
               const m = MATCH_META[l.match_status] || MATCH_META.unmatched
+              const fl = FLAG_META[l.flag] || FLAG_META.review
+              const up = l.cost_change_pct != null && l.cost_change_pct > 0
+              const down = l.cost_change_pct != null && l.cost_change_pct < 0
               return (
                 <div key={l.id} style={{
-                  display: 'grid', gridTemplateColumns: '1fr 2fr 70px 110px 110px 110px', gap: '10px',
+                  display: 'grid', gridTemplateColumns: LINE_GRID, gap: '10px', minWidth: '760px',
                   padding: '9px 18px', borderBottom: '1px solid #131c28', alignItems: 'center', fontSize: '12.5px',
                 }}>
                   <div style={{ color: '#d0d8e4', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.vendor_item_no || '—'}</div>
                   <div style={{ color: '#8aa0b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.description || '—'}</div>
-                  <div style={{ color: '#8aa0b8' }}>{l.uom || '—'}</div>
+                  <div style={{ color: '#8aa0b8' }}>{formatCurrency(l.old_cost)}</div>
                   <div style={{ color: '#c0cad8' }}>{formatCurrency(l.new_cost)}</div>
-                  <div style={{ color: '#8aa0b8' }}>{formatCurrency(l.new_list)}</div>
+                  <div style={{ color: up ? '#f87171' : down ? '#fbbf24' : '#5a6e84', fontWeight: up || down ? '600' : '400' }}>
+                    {l.cost_change_pct != null ? formatPct(l.cost_change_pct) : '—'}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#8aa0b8', fontSize: '11.5px' }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: fl.dot, flexShrink: 0 }} />
+                    {fl.label}
+                  </div>
                   <div>
                     <span style={{ padding: '2px 8px', borderRadius: '999px', fontSize: '10.5px', fontWeight: '600', backgroundColor: m.pillBg, color: m.pillText }}>{m.label}</span>
                   </div>
                 </div>
               )
             })}
+          </div>
           </div>
         </div>
       )}
@@ -240,6 +288,8 @@ export default function BatchDetail() {
     </div>
   )
 }
+
+const LINE_GRID = '1.2fr 1.8fr 90px 90px 70px 100px 96px'
 
 function btnPrimary(busy) {
   return {

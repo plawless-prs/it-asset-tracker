@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '../../../../../lib/supabase'
 import { useRole } from '../../../../../lib/useRole'
 import { MAPPING_FIELDS, buildLinesFromRows, formatCurrency } from '../../../../../lib/priceupdates'
-import { fetchParsedSheets, applyParse } from '../../../../../lib/priceupdatesParse'
+import { fetchParsedSheets, applyParse, triggerMatch } from '../../../../../lib/priceupdatesParse'
 
 const SPREADSHEET = /\.(xlsx|xls|csv)$/i
 
@@ -170,6 +170,10 @@ export default function MapBatch() {
         batch, file: files.find(x => x.id === fileId), sheets, config, userId: user?.id,
         saveProfile: (saveProfile && batch?.vendor_id) ? { label: profileLabel } : null,
       })
+      // Match against the P21 mirror right after parsing. Best-effort: if the
+      // mirror isn't synced or the vendor has no supplier id, the batch is still
+      // parsed and the reviewer can re-run matching from the batch page.
+      try { await triggerMatch(supabase, id) } catch { /* non-fatal */ }
       router.push(`/priceupdates/batches/${id}`)
     } catch (e) {
       setApplyError(e.message || 'Apply failed')

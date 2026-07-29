@@ -16,6 +16,7 @@ Run them **in order** the first time:
 | 8 | `08_asset_rack_mountable.sql` | `assets.rack_mountable` boolean flag. |
 | 9 | `09_rack_audits.sql` | `rack_audits` + `rack_audit_items` (rack audit workflow). |
 | 10 | `10_priceupdates_schema.sql` | Price Update Processor (`priceupdates`): `pu_vendors`/`pu_parse_profiles`/`pu_batches`/`pu_batch_files`/`pu_lines`/`p21_item_mirror`/`pu_exports`/`pu_settings`, the `has_app_access()` RLS helper, and the private `price-files` Storage bucket. |
+| 11 | `11_priceupdates_matching.sql` | Price Update Processor Phase 3: `pu_vendors.p21_item_prefix` + the `pu_apply_matches(jsonb)` bulk line-update function used by the matching route. |
 
 ## Notes
 

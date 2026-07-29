@@ -226,3 +226,36 @@ export function buildLinesFromRows(rows, config = {}) {
 
   return { lines, skippedNoPrice, dataRows: Math.max(0, rows.length - startIdx) }
 }
+
+// --- Matching / flags (Phase 3) ---------------------------------------------
+// Normalize a part number for comparison: trim, uppercase, strip whitespace and
+// dashes. Slashes/dots/etc. are kept — they're meaningful in part numbers.
+export function normalizePart(s) {
+  if (s === null || s === undefined) return ''
+  return String(s).trim().toUpperCase().replace(/[\s-]/g, '')
+}
+
+// Percent change old -> new cost, rounded to 2dp. Null when there's no usable
+// baseline (unknown or zero old cost).
+export function costChangePct(oldCost, newCost) {
+  const o = Number(oldCost), n = Number(newCost)
+  if (!isFinite(o) || o === 0 || oldCost === null || oldCost === undefined) return null
+  if (!isFinite(n) || newCost === null || newCost === undefined) return null
+  return Math.round(((n - o) / o) * 10000) / 100
+}
+
+// Guardrail flag for a (matched) line given pu_settings. Priority:
+// large_increase > cost_over_list > decrease > ok. Only 'ok' is "clean".
+//   settings: { large_increase_pct, flag_decreases, flag_cost_over_list }
+export function computeFlag(line, settings = {}) {
+  const { new_cost, new_list, old_cost } = line
+  const largePct = Number(settings.large_increase_pct ?? 20)
+  const pct = costChangePct(old_cost, new_cost)
+
+  if (pct !== null && pct > largePct) return 'large_increase'
+  if ((settings.flag_cost_over_list ?? true) && new_cost != null && new_list != null && Number(new_cost) > Number(new_list)) {
+    return 'cost_over_list'
+  }
+  if ((settings.flag_decreases ?? true) && pct !== null && pct < 0) return 'decrease'
+  return 'ok'
+}

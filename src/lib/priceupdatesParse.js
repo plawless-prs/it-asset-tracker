@@ -28,6 +28,36 @@ function pickSheet(sheets, name) {
   return sheets.find(s => s.name === name) || sheets[0]
 }
 
+// Small helper to call a Bearer-authed priceupdates API route.
+async function postWithSession(supabase, path, body) {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) throw new Error('Not signed in')
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify(body || {}),
+  })
+  let json = null
+  try { json = await res.json() } catch { /* non-JSON */ }
+  if (!res.ok) throw new Error(json?.error || `Request failed (${res.status})`)
+  return json
+}
+
+// Run the matching pass for a batch (parse -> match, and re-runnable).
+export function triggerMatch(supabase, batchId) {
+  return postWithSession(supabase, '/api/priceupdates/match', { batch_id: batchId })
+}
+
+// Kick a manual P21 mirror sync (Settings "Sync now").
+export function syncP21(supabase) {
+  return postWithSession(supabase, '/api/p21/sync-items', {})
+}
+
+// Prove the P21 connection + view/field names without writing anything.
+export function testP21(supabase) {
+  return postWithSession(supabase, '/api/p21/sync-items', { test: true })
+}
+
 // Apply a mapping `config` to a file's rows and persist the result.
 //   - batch:  { id, vendor_id, status }
 //   - file:   { id, parse_profile_id }
