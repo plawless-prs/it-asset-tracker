@@ -3,28 +3,31 @@
 Snapshot so work can resume on another machine. Pairs with `build-spec.md` (the
 plan), `../AGENTS.md` (architecture), and `../CHANGELOG.md` (what changed).
 
-## Where things stand (2026-07-29)
+## Where things stand (2026-07-30)
 
-- **Phases 1–3 are built and committed.** Phase 4+ (review/approve UI, `.txt`
-  export, email intake, polish) not started.
+- **Phases 1–3 are built and committed, and the P21 data pull is WORKING** via
+  the SQL replica (see below). Phase 4+ (review/approve UI, `.txt` export, email
+  intake, polish) not started.
 - **All work is on branch `priceupdates-phase-3`** (stacked: phase-1 → phase-2 →
   phase-3; the phase-3 branch contains everything). **Not merged to `main`** on
-  purpose — `main` auto-deploys to production and the app can't complete a P21
-  sync yet. Check out `priceupdates-phase-3` to continue.
-- **Current blocker — the P21 data pull:**
-  - Token auth **works** against the play instance (`P21_BASE_URL=https://powerandrubber-play.epicordistribution.com`).
-  - OData calls return **401 "You are not authorized to access API. Please
-    contact administrator to get access."** → a **P21-side API-access grant** for
-    the `PRICEUPDATE` user is pending (not a code issue).
-- **Open decision — how to fill `p21_item_mirror`:** the Supabase mirror is the
-  integration boundary; the app only reads it. Two ways to fill it:
-  1. **OData API** (built) → Vercel cron. Blocked on the grant above; also needs
-     Vercel egress IPs allowlisted at Epicor for production.
-  2. **Read-only SQL replica** (under evaluation) → run Porter's join query
-     directly. Simpler + always current + no API gate. If the DB is
-     internal-only, run the sync from an **internal scheduled Node script**
-     (`mssql`) that upserts into Supabase; Vercel never touches P21. Awaiting DB
-     engine/location/reachability + connection details before building.
+  purpose — merge once production env vars are set. Check out
+  `priceupdates-phase-3` to continue.
+- **Mirror fill — RESOLVED: the read-only SQL replica.** Epicor provisioned a
+  `readonly_*` SQL account; the replica (`p21us-read10.epicordistribution.com`,
+  db `az_131184_live`) is **publicly reachable over TLS**, so the Vercel-cron
+  architecture stands — no in-network runner needed. New client
+  `src/lib/p21sql.js`; `/api/p21/sync-items` auto-prefers SQL over OData.
+  **Verified live 2026-07-30: 71,503 rows upserted in ~27s** (Gates 10638:
+  28,467 · ContiTech 10629: 38,227 · Parker 10140: 4,809 — real supplier ids,
+  looked up in the replica, now set on `pu_vendors`). Production unknown:
+  whether Epicor IP-restricts the replica (first deployed cron run will tell).
+- **OData path (fallback, still gateway-blocked):** token auth + catalog +
+  $metadata all work, but **every OData data query returns 401** ("You are not
+  authorized to access API") — for two different users and even with a
+  registered consumer key (app `PRS-PriceUpdates`, scope `/odata`, type Service;
+  token confirms `aud:/odata`). It's a user-level grant on Epicor's side
+  (EpicCare ticket if we ever need OData); not a code issue. `P21_CONSUMER_KEY`
+  is wired into `src/lib/p21.js` should it come through.
 
 ## New-device setup
 
@@ -46,10 +49,14 @@ plan), `../AGENTS.md` (architecture), and `../CHANGELOG.md` (what changed).
 
 - **Supabase:** `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
   `SUPABASE_SERVICE_ROLE_KEY`
-- **P21 (play):** `P21_BASE_URL` (= `https://powerandrubber-play.epicordistribution.com`),
-  `P21_USERNAME`, `P21_PASSWORD`. Optional: `P21_CONSUMER_KEY` (if P21 admin issues
-  a consumer key), plus the `P21_TOKEN_PATH` / `P21_ODATA_BASE` / `P21_*_VIEW` /
-  `P21_F_*` overrides documented in `../AGENTS.md`.
+- **P21 SQL replica (the working sync source):** `P21_SQL_HOST`, `P21_SQL_PORT`,
+  `P21_SQL_DATABASE`, `P21_SQL_USERNAME`, `P21_SQL_PASSWORD` (Epicor-provisioned
+  `readonly_*` account).
+- **P21 OData (fallback, currently gateway-blocked):** `P21_BASE_URL`
+  (= `https://powerandrubber-play.epicordistribution.com`), `P21_USERNAME`,
+  `P21_PASSWORD`, `P21_CONSUMER_KEY` (registered app `PRS-PriceUpdates`), plus
+  the `P21_TOKEN_PATH` / `P21_ODATA_BASE` / `P21_*_VIEW` / `P21_F_*` overrides
+  documented in `../AGENTS.md`.
 - **Email/Graph + `CRON_SECRET`** etc. — only if exercising Help Desk locally; see
   `../AGENTS.md` "Environment variables".
 
@@ -58,13 +65,9 @@ that way.
 
 ## To resume
 
-- **If P21 API access gets granted:** Settings → **Test connection** → **Sync
-  now**, then open a Gates batch → **Re-run matching**. Confirm old→new cost, Δ%,
-  flags populate. Then start Phase 4.
-- **If going the SQL route:** add `mssql`, write `scripts/sync-p21-sql.mjs` that
-  runs the join query (`p21_view_inventory_supplier` × `p21_view_inv_mast` on
-  `inv_mast_uid`, per supplier, `delete_flag='N'`) and upserts `p21_item_mirror`
-  via the service role; schedule it on an in-network machine.
+- The mirror is synced (71.5k rows). Next verification step: open a Gates batch
+  → **Re-run matching**; confirm old→new cost, Δ%, flags populate. Then start
+  Phase 4.
 - Remaining phases: **4** review/approve UI · **5** `.txt` export (tab-delimited:
   `Item ID⇥List Price⇥New Cost⇥Supplier ID`, see `samples/README.md`) · **6**
   email intake from `priceupdate@` · **7** polish.
