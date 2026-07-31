@@ -72,16 +72,18 @@ Run `claude` in a terminal → browser opens → sign in with your Anthropic acc
 
 ## 7. Pull the projects
 
-GitHub clones fetch all branches but only check out `main`, so check out the
-working branch explicitly:
+All active work is merged to `main` (Price Update Processor phases 1–5 included),
+so the default checkout is the right branch:
 
 ```powershell
 cd $env:USERPROFILE\Documents
 git clone https://github.com/plawless-prs/it-asset-tracker.git
 cd it-asset-tracker
-git checkout priceupdates-phase-3     # active work: phases 1 -> 2 -> 3
 npm install
 ```
+
+If work moves to a feature branch again, `git checkout <branch>` after cloning
+(clones fetch all branches but only check out `main`).
 
 Repeat `git clone` for any other repos.
 
