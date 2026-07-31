@@ -5,9 +5,9 @@ plan), `../AGENTS.md` (architecture), and `../CHANGELOG.md` (what changed).
 
 ## Where things stand (2026-07-30)
 
-- **Phases 1–3 are built and committed, and the P21 data pull is WORKING** via
-  the SQL replica (see below). Phase 4+ (review/approve UI, `.txt` export, email
-  intake, polish) not started.
+- **Phases 1–4 are built, and the P21 data pull is WORKING** via the SQL
+  replica (see below). Phase 4 (two-pane review/approve UI) landed 2026-07-31;
+  Phase 5+ (`.txt` export, email intake, polish) not started.
 - **All work is on branch `priceupdates-phase-3`** (stacked: phase-1 → phase-2 →
   phase-3; the phase-3 branch contains everything). **Not merged to `main`** on
   purpose — merge once production env vars are set. Check out

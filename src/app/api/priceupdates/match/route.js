@@ -49,7 +49,7 @@ export async function POST(req) {
     const PAGE = 1000
     for (let from = 0; ; from += PAGE) {
       const { data: rows, error } = await admin
-        .from('pu_lines').select('id, vendor_item_no, new_cost, new_list')
+        .from('pu_lines').select('id, vendor_item_no, new_cost, new_list, match_status, include')
         .eq('batch_id', batchId).order('id').range(from, from + PAGE - 1)
       if (error) return Response.json({ ok: false, error: error.message }, { status: 500 })
       if (!rows || rows.length === 0) break
@@ -119,6 +119,28 @@ export async function POST(req) {
     if (error) return Response.json({ ok: false, error: error.message }, { status: 500 })
   }
 
+  // Include/exclude defaults driven by the match outcome. Unmatched lines are
+  // auto-excluded (reviewers spend their time on ambiguous/flagged lines, not
+  // the not-in-P21 tail). A line that just transitioned unmatched -> matched/
+  // ambiguous while excluded is re-included (the sync-mirror-then-rematch
+  // rescue). Reviewed lines whose status didn't change keep the reviewer's
+  // manual include/exclude choice — re-running stays non-destructive there.
+  const byId = new Map(lines.map(l => [l.id, l]))
+  const toExclude = [], toInclude = []
+  for (const u of updates) {
+    const prev = byId.get(u.id)
+    if (!prev) continue
+    if (u.match_status === 'unmatched' && prev.include) toExclude.push(u.id)
+    else if (u.match_status !== 'unmatched' && prev.match_status === 'unmatched' && !prev.include) toInclude.push(u.id)
+  }
+  for (const [ids, include] of [[toExclude, false], [toInclude, true]]) {
+    for (let i = 0; i < ids.length; i += 500) {
+      const { error } = await admin.from('pu_lines')
+        .update({ include }).in('id', ids.slice(i, i + 500))
+      if (error) return Response.json({ ok: false, error: error.message }, { status: 500 })
+    }
+  }
+
   const advance = ['received', 'parsing', 'failed', 'needs_review'].includes(batch.status)
   await admin.from('pu_batches').update({
     matched_count: matched,
@@ -133,6 +155,8 @@ export async function POST(req) {
     unmatched: lines.length - matched - ambiguous,
     ambiguous,
     flagged,
+    auto_excluded: toExclude.length,
+    auto_included: toInclude.length,
     mirror_rows: mirrorRows,
     supplier_id: supplierId,
     warning: supplierId ? undefined : 'vendor has no p21_supplier_id — nothing to match against',
