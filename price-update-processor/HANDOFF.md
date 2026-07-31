@@ -17,10 +17,11 @@ plan), `../AGENTS.md` (architecture), and `../CHANGELOG.md` (what changed).
   named `<vendor prefix><effective year>.txt`; blank cell = "no change" in P21.
   **Not yet verified against a real P21 import load** — do that before trusting
   the loop end-to-end.
-- **All work is on branch `priceupdates-phase-3`** (stacked: phase-1 → phase-2 →
-  phase-3; the phase-3 branch contains everything). **Not merged to `main`** on
-  purpose — merge once production env vars are set. Check out
-  `priceupdates-phase-3` to continue.
+- **Merged to `main` and deployed to production 2026-07-31** (P21 SQL env vars
+  were added to Vercel first). The `priceupdates-phase-3` branch history is in
+  `main`; continue new work on fresh branches off `main`. Watch the first
+  nightly `/api/p21/sync-items` cron run (07:00 UTC) — it's the test of whether
+  Epicor IP-restricts the replica from Vercel's egress.
 - **Mirror fill — RESOLVED: the read-only SQL replica.** Epicor provisioned a
   `readonly_*` SQL account; the replica (`p21us-read10.epicordistribution.com`,
   db `az_131184_live`) is **publicly reachable over TLS**, so the Vercel-cron
