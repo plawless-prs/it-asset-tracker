@@ -6,12 +6,18 @@
       "Edit",
       "Write",
       "Glob",
-      "Grep"
+      "Grep",
+      "PowerShell(node:*)",
+      "PowerShell(npm:*)",
+      "PowerShell(npx:*)"
     ],
     "ask": [
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "PowerShell(git add:*)",
+      "PowerShell(git commit:*)",
+      "PowerShell(git push:*)"
     ],
     "deny": [
       "Bash(rm -rf:*)",

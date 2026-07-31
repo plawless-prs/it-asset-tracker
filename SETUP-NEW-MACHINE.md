@@ -9,6 +9,12 @@ these projects. Work top-to-bottom. Pairs with `price-update-processor/HANDOFF.m
 - Download: https://git-scm.com/downloads/win — run it, accept defaults (keep
   "Git from the command line and also from 3rd-party software").
 - Verify in a new PowerShell: `git --version`
+- Set your commit identity (otherwise the first commit lands as `unknown` and
+  needs re-authoring):
+  ```powershell
+  git config --global user.name "Porter Lawless"
+  git config --global user.email "porterlawless@gmail.com"
+  ```
 - Bundled **Git Credential Manager** handles GitHub sign-in — the first clone/push
   of a private repo pops a browser login (sign into GitHub in your browser first).
 
