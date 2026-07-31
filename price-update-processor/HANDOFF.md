@@ -3,11 +3,20 @@
 Snapshot so work can resume on another machine. Pairs with `build-spec.md` (the
 plan), `../AGENTS.md` (architecture), and `../CHANGELOG.md` (what changed).
 
-## Where things stand (2026-07-30)
+## Where things stand (2026-07-31)
 
-- **Phases 1–4 are built, and the P21 data pull is WORKING** via the SQL
-  replica (see below). Phase 4 (two-pane review/approve UI) landed 2026-07-31;
-  Phase 5+ (`.txt` export, email intake, polish) not started.
+- **Phases 1–5 are built, and the P21 data pull is WORKING** via the SQL
+  replica (see below). Phase 4 (two-pane review/approve UI) and Phase 5
+  (export + applied loop, commit `d43f473`) landed 2026-07-31. Phase 5 also
+  brought **ambiguous auto-pick + per-vendor match memory** (`pu_item_aliases`,
+  migration `13` — applied to Supabase): ambiguous lines get the closest P21
+  candidate auto-assigned and don't block Approve; approving (or manually
+  fixing a line) records the resolution, and the match route replays it on the
+  vendor's next batch. Export: tab-delimited `.txt` (CRLF, header, fixed column
+  order `Item ID⇥List Price⇥New Cost⇥Supplier ID` — P21 imports by position),
+  named `<vendor prefix><effective year>.txt`; blank cell = "no change" in P21.
+  **Not yet verified against a real P21 import load** — do that before trusting
+  the loop end-to-end.
 - **All work is on branch `priceupdates-phase-3`** (stacked: phase-1 → phase-2 →
   phase-3; the phase-3 branch contains everything). **Not merged to `main`** on
   purpose — merge once production env vars are set. Check out
@@ -40,7 +49,7 @@ plan), `../AGENTS.md` (architecture), and `../CHANGELOG.md` (what changed).
 5. **(Optional, testing only)** copy the git-ignored real data files — they don't
    travel with the repo either: `price-update-processor/samples/GAT2026.txt`
    (real Gates import sample, used to shape the Phase 5 exporter).
-6. **Supabase is cloud and shared** — migrations `01`–`11` are already applied to
+6. **Supabase is cloud and shared** — migrations `01`–`13` are already applied to
    the project; nothing to re-run on a new device. (Only if pointing at a *fresh*
    Supabase project: run every `supabase/*.sql` in numbered order.)
 7. `npm run dev`.
@@ -65,9 +74,20 @@ that way.
 
 ## To resume
 
-- The mirror is synced (71.5k rows). Next verification step: open a Gates batch
-  → **Re-run matching**; confirm old→new cost, Δ%, flags populate. Then start
-  Phase 4.
-- Remaining phases: **4** review/approve UI · **5** `.txt` export (tab-delimited:
-  `Item ID⇥List Price⇥New Cost⇥Supplier ID`, see `samples/README.md`) · **6**
-  email intake from `priceupdate@` · **7** polish.
+- **Next up is Phase 5.5 (decided 2026-07-31, not in the original build-spec):
+  a price-file library in the app, stored in Supabase Storage.** Porter's
+  historical price-file archive currently lives in folders on the office PC;
+  decision made to house it in the existing private `price-files` bucket
+  (already holds batch files + exports; auth/policies already in place; ~100 GB
+  included on Supabase Pro — plenty, these are small spreadsheets) rather than
+  a self-hosted file server or NAS. Rough scope agreed: a bulk-upload path for
+  the historical archive (possibly a script walking the local folder tree), a
+  `vendor/year/` object-key convention, and a Files/library page in the Price
+  Updates app (browse/search/download; link files to their batches where
+  known). Not started — spec it, confirm scope with Porter, then build.
+  **The local archive itself is on the office PC** — bulk-upload work needs
+  either that machine or the folders copied over.
+- After 5.5, remaining build-spec phases: **6** email intake from
+  `priceupdate@` · **7** polish. Porter explicitly wants 5.5 before Phase 6.
+- Also outstanding: round-trip a generated export through P21's real import
+  tool once (Phase 5 acceptance).
