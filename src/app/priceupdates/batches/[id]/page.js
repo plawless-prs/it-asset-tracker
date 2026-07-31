@@ -8,9 +8,9 @@ import { useRole } from '../../../../lib/useRole'
 import {
   BATCH_STATUS_META, SOURCE_META, MATCH_META, FLAG_META,
   formatCurrency, formatDate, formatPct, relativeTime,
-  costChangePct, computeFlag,
+  costChangePct, computeFlag, normalizePart,
 } from '../../../../lib/priceupdates'
-import { fetchParsedSheets, applyParse, triggerMatch } from '../../../../lib/priceupdatesParse'
+import { fetchParsedSheets, applyParse, triggerMatch, generateExport } from '../../../../lib/priceupdatesParse'
 
 const SPREADSHEET = /\.(xlsx|xls|csv)$/i
 const PAGE_SIZE = 100
@@ -28,12 +28,12 @@ const TABS = [
   { key: 'excluded',  label: 'Excluded' },
 ]
 
-// Apply a tab's filter to a pu_lines query. Flagged = guardrail hits (not ok,
-// not the plain "new"/unmatched marker). Ambiguous gets its own tab — it's the
-// review-priority queue (blocks approval); unmatched is the auto-excluded
-// not-in-P21 tail.
+// Apply a tab's filter to a pu_lines query. Flagged = MATCHED lines with
+// guardrail hits only — auto-picked ambiguous lines live solely in the
+// Ambiguous tab (their pick is skimmed there, guardrail flag and all), never
+// mixed into Flagged. Unmatched is the auto-excluded not-in-P21 tail.
 function tabFilter(q, tab) {
-  if (tab === 'flagged') return q.not('flag', 'in', '(ok,new)')
+  if (tab === 'flagged') return q.eq('match_status', 'matched').not('flag', 'in', '(ok,new)')
   if (tab === 'ambiguous') return q.eq('match_status', 'ambiguous')
   if (tab === 'unmatched') return q.eq('match_status', 'unmatched')
   if (tab === 'excluded') return q.eq('include', false)
@@ -47,6 +47,7 @@ export default function BatchDetail() {
 
   const [batch, setBatch] = useState(null)
   const [files, setFiles] = useState([])
+  const [exports, setExports] = useState([])
   const [profiles, setProfiles] = useState([])
   const [settings, setSettings] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -55,7 +56,7 @@ export default function BatchDetail() {
   const [page, setPage] = useState(0)
   const [lines, setLines] = useState([])
   const [tabTotal, setTabTotal] = useState(0)
-  const [counts, setCounts] = useState({ all: 0, flagged: 0, ambiguous: 0, unmatched: 0, excluded: 0, ambiguousIncluded: 0 })
+  const [counts, setCounts] = useState({ all: 0, flagged: 0, ambiguous: 0, unmatched: 0, excluded: 0, ambiguousUnpicked: 0 })
 
   const [selected, setSelected] = useState(() => new Set())
   const [editing, setEditing] = useState(null)          // { lineId, field, value }
@@ -63,6 +64,8 @@ export default function BatchDetail() {
   const [busyFile, setBusyFile] = useState(null)
   const [matching, setMatching] = useState(false)
   const [approving, setApproving] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [applying, setApplying] = useState(false)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
 
@@ -79,6 +82,11 @@ export default function BatchDetail() {
       .select('id, file_name, file_size, storage_path, parse_status, parsed_rows, parse_profile_id, error, created_at')
       .eq('batch_id', id).order('created_at')
     setFiles(f || [])
+    const { data: ex } = await supabase
+      .from('pu_exports')
+      .select('id, file_name, storage_path, row_count, created_at, creator:created_by(full_name, email)')
+      .eq('batch_id', id).order('created_at', { ascending: false })
+    setExports(ex || [])
     if (b?.vendor_id) {
       const { data: p } = await supabase
         .from('pu_parse_profiles').select('id, label, config, created_at')
@@ -93,7 +101,9 @@ export default function BatchDetail() {
     return b
   }
 
-  // Tab counts + the approve gate (ambiguous lines still included).
+  // Tab counts + the approve gate. Auto-picked ambiguous lines don't block
+  // approval (approving confirms their pick); only an included ambiguous line
+  // with NO pick at all still gates.
   async function loadCounts() {
     const head = { count: 'exact', head: true }
     const base = () => supabase.from('pu_lines').select('id', head).eq('batch_id', id)
@@ -103,7 +113,7 @@ export default function BatchDetail() {
       tabFilter(base(), 'ambiguous'),
       tabFilter(base(), 'unmatched'),
       tabFilter(base(), 'excluded'),
-      base().eq('include', true).eq('match_status', 'ambiguous'),
+      base().eq('include', true).eq('match_status', 'ambiguous').is('p21_item_id', null),
     ])
     setCounts({
       all: all.count || 0,
@@ -111,7 +121,7 @@ export default function BatchDetail() {
       ambiguous: ambiguous.count || 0,
       unmatched: unmatched.count || 0,
       excluded: excluded.count || 0,
-      ambiguousIncluded: amb.count || 0,
+      ambiguousUnpicked: amb.count || 0,
     })
   }
 
@@ -139,8 +149,10 @@ export default function BatchDetail() {
   async function refreshBatchCounts() {
     const head = { count: 'exact', head: true }
     const base = () => supabase.from('pu_lines').select('id', head).eq('batch_id', id)
+    // matched_count = every line carrying a pick (incl. auto-picked ambiguous),
+    // same definition as the match route.
     const [m, f] = await Promise.all([
-      base().eq('match_status', 'matched'),
+      base().not('p21_item_id', 'is', null),
       tabFilter(base(), 'flagged'),
     ])
     await supabase.from('pu_batches').update({
@@ -155,12 +167,14 @@ export default function BatchDetail() {
     setLines(ls => ls.map(l => (l.id === lineId ? { ...l, ...patch } : l)))
   }
 
-  // Recompute Δ% + flag for a line after a cost/list/match edit.
+  // Recompute Δ% + flag for a line after a cost/list/match edit. An ambiguous
+  // line with an auto-pick carries real guardrail flags like a matched line.
   function derive(line) {
     const pct = costChangePct(line.old_cost, line.new_cost)
     let flag = line.flag
-    if (line.match_status === 'matched') flag = computeFlag(line, settings || {})
-    else if (line.match_status === 'ambiguous') flag = 'review'
+    if (line.match_status === 'matched' || (line.match_status === 'ambiguous' && line.p21_item_id)) {
+      flag = computeFlag(line, settings || {})
+    } else if (line.match_status === 'ambiguous') flag = 'review'
     else flag = 'new'
     return { cost_change_pct: pct, flag }
   }
@@ -190,9 +204,26 @@ export default function BatchDetail() {
     if (tab === 'excluded') loadLines()   // rows leave this view when re-included
   }
 
+  // Remember (or forget) a manual resolution in pu_item_aliases so the next
+  // batch from this vendor matches the same part the same way automatically.
+  async function saveAlias(vendorItemNo, p21ItemId) {
+    const vendorId = batch.vendor?.id
+    const key = normalizePart(vendorItemNo)
+    if (!vendorId || !key) return
+    if (p21ItemId) {
+      await supabase.from('pu_item_aliases').upsert(
+        { vendor_id: vendorId, normalized_part: key, p21_item_id: p21ItemId, source: 'manual', created_by: user?.id || null, updated_at: new Date().toISOString() },
+        { onConflict: 'vendor_id,normalized_part' },
+      )
+    } else {
+      await supabase.from('pu_item_aliases').delete().eq('vendor_id', vendorId).eq('normalized_part', key)
+    }
+  }
+
   // Apply a picked mirror item to a line (the fix-an-unmatched-line flow).
   // Matching a line re-includes it; clearing back to unmatched auto-excludes it
-  // (same defaults the match route applies).
+  // (same defaults the match route applies). The pick is remembered for the
+  // vendor's next batch; clearing forgets it.
   async function applyMatch(line, mirrorRow) {
     const next = {
       ...line,
@@ -210,6 +241,7 @@ export default function BatchDetail() {
     patchLocal(line.id, patch)
     const { error: e } = await supabase.from('pu_lines').update(patch).eq('id', line.id)
     if (e) { setError(`Save failed: ${e.message}`); return loadLines() }
+    saveAlias(line.vendor_item_no, next.p21_item_id)
     refreshBatchCounts(); loadCounts()
   }
 
@@ -220,19 +252,61 @@ export default function BatchDetail() {
     setApproving(true)
     try {
       // Re-verify the gate server-side at click time, not from stale state.
-      const { count: amb } = await supabase
+      // Only included ambiguous lines with NO pick block — auto-picked ones are
+      // confirmed by this very approval.
+      const { count: unpicked } = await supabase
         .from('pu_lines').select('id', { count: 'exact', head: true })
-        .eq('batch_id', id).eq('include', true).eq('match_status', 'ambiguous')
-      if (amb > 0) {
-        setError(`${amb} included line${amb === 1 ? ' is' : 's are'} still ambiguous — resolve or exclude them first.`)
+        .eq('batch_id', id).eq('include', true).eq('match_status', 'ambiguous').is('p21_item_id', null)
+      if (unpicked > 0) {
+        setError(`${unpicked} included ambiguous line${unpicked === 1 ? ' has' : 's have'} no pick — resolve or exclude them first.`)
         return
       }
+
+      // Confirm the included auto-picks: remember each in pu_item_aliases (so
+      // the vendor's next batch matches them automatically) and promote the
+      // lines to matched so they export.
+      let confirmed = 0
+      if (batch.vendor?.id) {
+        const PAGE = 1000
+        const picked = []
+        for (let from = 0; ; from += PAGE) {
+          const { data: rows, error: pErr } = await supabase
+            .from('pu_lines').select('id, vendor_item_no, p21_item_id')
+            .eq('batch_id', id).eq('include', true).eq('match_status', 'ambiguous').not('p21_item_id', 'is', null)
+            .order('id').range(from, from + PAGE - 1)
+          if (pErr) throw pErr
+          picked.push(...(rows || []))
+          if (!rows || rows.length < PAGE) break
+        }
+        confirmed = picked.length
+        const seen = new Set()
+        const aliasRows = []
+        for (const l of picked) {
+          const key = normalizePart(l.vendor_item_no)
+          if (!key || seen.has(key)) continue
+          seen.add(key)
+          aliasRows.push({ vendor_id: batch.vendor.id, normalized_part: key, p21_item_id: l.p21_item_id, source: 'review', created_by: user?.id || null, updated_at: new Date().toISOString() })
+        }
+        for (let i = 0; i < aliasRows.length; i += 500) {
+          const { error: aErr } = await supabase.from('pu_item_aliases')
+            .upsert(aliasRows.slice(i, i + 500), { onConflict: 'vendor_id,normalized_part' })
+          if (aErr) throw aErr
+        }
+        if (confirmed > 0) {
+          const { error: mErr } = await supabase.from('pu_lines')
+            .update({ match_status: 'matched' })
+            .eq('batch_id', id).eq('include', true).eq('match_status', 'ambiguous').not('p21_item_id', 'is', null)
+          if (mErr) throw mErr
+        }
+      }
+
       const head = { count: 'exact', head: true }
       const { count: included } = await supabase
         .from('pu_lines').select('id', head).eq('batch_id', id).eq('include', true)
       const stamp = new Date().toISOString()
       const who = user?.email || 'unknown'
-      const activity = `[${stamp.slice(0, 16).replace('T', ' ')}] Approved by ${who} — ${included} of ${counts.all} lines included (${counts.flagged} flagged, ${counts.excluded} excluded).`
+      const confirmedBit = confirmed > 0 ? `, ${confirmed} auto-picked match${confirmed === 1 ? '' : 'es'} confirmed` : ''
+      const activity = `[${stamp.slice(0, 16).replace('T', ' ')}] Approved by ${who} — ${included} of ${counts.all} lines included (${counts.flagged} flagged, ${counts.excluded} excluded${confirmedBit}).`
       const { error: e } = await supabase.from('pu_batches').update({
         status: 'approved',
         approved_by: user?.id || null,
@@ -241,14 +315,74 @@ export default function BatchDetail() {
         notes: batch.notes ? `${batch.notes}\n${activity}` : activity,
       }).eq('id', id)
       if (e) throw e
-      setNotice(`Approved — ${included} lines ready for export.`)
+      setNotice(`Approved — ${included} lines ready for export${confirmedBit ? ` (${confirmed} auto-picks confirmed & remembered)` : ''}.`)
       setSelected(new Set()); setEditing(null)
-      await loadBatch()
+      await loadBatch(); await loadCounts(); await loadLines()
     } catch (e) {
       setError(`Approve failed: ${e.message}`)
     } finally {
       setApproving(false)
     }
+  }
+
+  // ---- export / applied (Phase 5) -------------------------------------------
+
+  // Appends an activity line to the batch's notes alongside a field update.
+  function withActivity(patch, text) {
+    const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ')
+    const activity = `[${stamp}] ${text}`
+    return { ...patch, notes: batch.notes ? `${batch.notes}\n${activity}` : activity }
+  }
+
+  async function doExport() {
+    setError(''); setNotice('')
+    setExporting(true)
+    try {
+      const r = await generateExport(supabase, id)
+      if (r.signedUrl) window.open(r.signedUrl, '_blank')
+      setNotice(`Export generated — ${r.file_name}, ${r.row_count.toLocaleString()} lines. Load it into P21's import tool, then mark the batch applied.`)
+      await loadBatch()
+    } catch (e) {
+      setError(`Export failed: ${e.message}`)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  async function downloadExport(exp) {
+    const { data, error: e } = await supabase.storage
+      .from('price-files').createSignedUrl(exp.storage_path, 60, { download: exp.file_name })
+    if (e) return setError(`Download failed: ${e.message}`)
+    window.open(data.signedUrl, '_blank')
+  }
+
+  async function markApplied() {
+    setError(''); setNotice('')
+    setApplying(true)
+    try {
+      const who = user?.email || 'unknown'
+      const { error: e } = await supabase.from('pu_batches').update(withActivity({
+        status: 'applied',
+        applied_at: new Date().toISOString(),
+        applied_by: user?.id || null,
+      }, `Marked applied in P21 by ${who}.`)).eq('id', id)
+      if (e) throw e
+      setNotice('Batch marked applied — the loop is closed.')
+      await loadBatch()
+    } catch (e) {
+      setError(`Update failed: ${e.message}`)
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  async function archiveBatch() {
+    setError(''); setNotice('')
+    const { error: e } = await supabase.from('pu_batches').update(withActivity(
+      { status: 'archived' }, `Archived by ${user?.email || 'unknown'}.`
+    )).eq('id', id)
+    if (e) return setError(`Archive failed: ${e.message}`)
+    await loadBatch()
   }
 
   // ---- files / parse / rematch (carried over from earlier phases) -----------
@@ -283,7 +417,8 @@ export default function BatchDetail() {
     try {
       const r = await triggerMatch(supabase, id)
       const bits = [`${r.matched}/${r.total} matched`]
-      if (r.ambiguous) bits.push(`${r.ambiguous} ambiguous`)
+      if (r.remembered) bits.push(`${r.remembered} from match memory`)
+      if (r.ambiguous) bits.push(`${r.ambiguous} ambiguous (auto-picked)`)
       if (r.flagged) bits.push(`${r.flagged} flagged`)
       if (r.auto_excluded) bits.push(`${r.auto_excluded} unmatched auto-excluded`)
       if (r.auto_included) bits.push(`${r.auto_included} re-included`)
@@ -311,7 +446,7 @@ export default function BatchDetail() {
   const src = SOURCE_META[batch.source] || {}
   const pageCount = Math.max(1, Math.ceil(tabTotal / PAGE_SIZE))
   const allOnPageSelected = lines.length > 0 && lines.every(l => selected.has(l.id))
-  const canApprove = batch.status === 'needs_review' && counts.ambiguousIncluded === 0 && counts.all > 0
+  const canApprove = batch.status === 'needs_review' && counts.ambiguousUnpicked === 0 && counts.all > 0
 
   return (
     <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
@@ -476,20 +611,50 @@ export default function BatchDetail() {
           {/* Primary action */}
           {batch.status === 'needs_review' && (
             <button onClick={approve} disabled={!canApprove || approving} title={
-              counts.ambiguousIncluded > 0 ? `${counts.ambiguousIncluded} included ambiguous line(s) must be resolved or excluded` : ''
+              counts.ambiguousUnpicked > 0 ? `${counts.ambiguousUnpicked} included ambiguous line(s) have no pick — resolve or exclude them` :
+              counts.ambiguous > 0 ? `Approving confirms the ${counts.ambiguous} auto-picked match(es) and remembers them for this vendor's next batch` : ''
             } style={{
               padding: '11px', borderRadius: '10px', fontSize: '13.5px', fontWeight: '700', border: 'none',
               backgroundColor: canApprove && !approving ? '#16a34a' : '#1a2433',
               color: canApprove && !approving ? '#fff' : '#5a6e84',
               cursor: canApprove && !approving ? 'pointer' : 'not-allowed',
             }}>
-              {approving ? 'Approving…' : counts.ambiguousIncluded > 0 ? `Resolve ${counts.ambiguousIncluded} ambiguous to approve` : `✓ Approve batch (${counts.all - counts.excluded} lines)`}
+              {approving ? 'Approving…' : counts.ambiguousUnpicked > 0 ? `Resolve ${counts.ambiguousUnpicked} ambiguous to approve` : `✓ Approve batch (${counts.all - counts.excluded} lines)`}
             </button>
           )}
           {batch.status === 'approved' && (
-            <div style={{ padding: '11px', borderRadius: '10px', fontSize: '12.5px', textAlign: 'center', backgroundColor: '#0d3320', color: '#4ade80', border: '1px solid #14532d' }}>
-              Approved — export lands in Phase 5
-            </div>
+            <button onClick={doExport} disabled={exporting} style={{
+              padding: '11px', borderRadius: '10px', fontSize: '13.5px', fontWeight: '700', border: 'none',
+              backgroundColor: exporting ? '#1a2433' : '#6d28d9',
+              color: exporting ? '#5a6e84' : '#fff',
+              cursor: exporting ? 'not-allowed' : 'pointer',
+            }}>{exporting ? 'Generating…' : '⬇ Generate P21 export'}</button>
+          )}
+          {batch.status === 'exported' && (
+            <>
+              <button onClick={markApplied} disabled={applying} style={{
+                padding: '11px', borderRadius: '10px', fontSize: '13.5px', fontWeight: '700', border: 'none',
+                backgroundColor: applying ? '#1a2433' : '#16a34a',
+                color: applying ? '#5a6e84' : '#fff',
+                cursor: applying ? 'not-allowed' : 'pointer',
+              }}>{applying ? 'Saving…' : '✓ Mark applied in P21'}</button>
+              <button onClick={doExport} disabled={exporting} style={{
+                padding: '9px', borderRadius: '10px', fontSize: '12.5px', fontWeight: '600',
+                backgroundColor: '#131a24', color: exporting ? '#5a6e84' : '#a78bfa',
+                border: '1px solid #2a2a4a', cursor: exporting ? 'not-allowed' : 'pointer',
+              }}>{exporting ? 'Generating…' : '↻ Regenerate export'}</button>
+            </>
+          )}
+          {batch.status === 'applied' && (
+            <>
+              <div style={{ padding: '11px', borderRadius: '10px', fontSize: '12.5px', textAlign: 'center', backgroundColor: '#0d3320', color: '#4ade80', border: '1px solid #14532d' }}>
+                Applied in P21 {formatDate(batch.applied_at)}
+              </div>
+              <button onClick={archiveBatch} style={{
+                padding: '9px', borderRadius: '10px', fontSize: '12.5px', fontWeight: '600',
+                backgroundColor: '#131a24', color: '#8aa0b8', border: '1px solid #1e2d40', cursor: 'pointer',
+              }}>Archive batch</button>
+            </>
           )}
 
           {/* Properties */}
@@ -536,14 +701,31 @@ export default function BatchDetail() {
             })}
           </div>
 
+          {/* Exports */}
+          {exports.length > 0 && (
+            <div style={{ backgroundColor: '#0f1620', border: '1px solid #182030', borderRadius: '14px', padding: '14px 16px' }}>
+              <div style={{ fontSize: '12px', fontWeight: '600', color: '#c0cad8', marginBottom: '10px' }}>Exports ({exports.length})</div>
+              {exports.map(e => (
+                <div key={e.id} style={{ marginBottom: '10px' }}>
+                  <div style={{ fontSize: '12px', color: '#d0d8e4' }}>{e.file_name}</div>
+                  <div style={{ fontSize: '11px', color: '#5a6e84', margin: '2px 0 5px' }}>
+                    {e.row_count.toLocaleString()} lines · {relativeTime(e.created_at)}
+                    {e.creator ? ` · ${e.creator.full_name || e.creator.email}` : ''}
+                  </div>
+                  <button onClick={() => downloadExport(e)} style={miniBtn('#1e2a3a', '#8aa0b8')}>Download</button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Timeline */}
           <div style={{ backgroundColor: '#0f1620', border: '1px solid #182030', borderRadius: '14px', padding: '14px 16px' }}>
             <div style={{ fontSize: '12px', fontWeight: '600', color: '#c0cad8', marginBottom: '10px' }}>Timeline</div>
             <TimelineStep done label="Received" detail={formatDate(batch.received_at)} />
             <TimelineStep done={counts.all > 0} label="Parsed" detail={counts.all > 0 ? `${counts.all.toLocaleString()} lines` : 'pending'} />
             <TimelineStep done={!!batch.approved_at} label="Approved" detail={batch.approved_at ? `${formatDate(batch.approved_at)} · ${batch.approver?.full_name || batch.approver?.email || ''}` : 'pending'} />
-            <TimelineStep done={!!batch.exported_at} label="Exported" detail={batch.exported_at ? formatDate(batch.exported_at) : 'Phase 5'} />
-            <TimelineStep done={!!batch.applied_at} label="Applied in P21" detail={batch.applied_at ? `${formatDate(batch.applied_at)} · ${batch.applier?.full_name || batch.applier?.email || ''}` : 'Phase 5'} last />
+            <TimelineStep done={!!batch.exported_at} label="Exported" detail={batch.exported_at ? formatDate(batch.exported_at) : 'pending'} />
+            <TimelineStep done={!!batch.applied_at} label="Applied in P21" detail={batch.applied_at ? `${formatDate(batch.applied_at)} · ${batch.applier?.full_name || batch.applier?.email || ''}` : 'pending'} last />
           </div>
 
           {batch.notes && (

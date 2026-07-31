@@ -54,7 +54,8 @@ export default function BatchQueue() {
 
   const filtered = batches.filter(b => {
     if (fStatus === 'open' && !['received', 'parsing', 'needs_review', 'approved', 'exported'].includes(b.status)) return false
-    if (fStatus !== 'open' && fStatus !== 'all' && b.status !== fStatus) return false
+    if (fStatus === 'history' && !['applied', 'archived'].includes(b.status)) return false
+    if (!['open', 'history', 'all'].includes(fStatus) && b.status !== fStatus) return false
     if (fVendor !== 'all' && (b.vendor?.id || 'none') !== fVendor) return false
     return true
   })
@@ -77,6 +78,7 @@ export default function BatchQueue() {
       <div style={{ display: 'flex', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
         <select style={selectStyle} value={fStatus} onChange={e => setFStatus(e.target.value)}>
           <option value="open">Open</option>
+          <option value="history">History (applied + archived)</option>
           <option value="all">All statuses</option>
           {BATCH_STATUS_ORDER.map(s => <option key={s} value={s}>{BATCH_STATUS_META[s].label}</option>)}
         </select>

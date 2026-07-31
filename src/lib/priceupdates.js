@@ -235,6 +235,33 @@ export function normalizePart(s) {
   return String(s).trim().toUpperCase().replace(/[\s-]/g, '')
 }
 
+// Pick the closest P21 candidate when a part number matches more than one
+// mirror row (the "ambiguous" case). Deterministic scoring, best first:
+//   +8  supplier_part_no is exactly the vendor's part (P21's own cross-ref)
+//   +4  p21_item_id is exactly "<vendor prefix><part>" (the id-bridge form)
+//   +2  p21_item_id starts with the vendor's prefix at all
+//   +1  the row carries a current cost (live supplier-cost record)
+// Ties break to the shorter item id, then alphabetical, so re-runs always pick
+// the same row. Returns the winning candidate (never null for non-empty input).
+export function pickBestCandidate(candidates, { normalizedPart, prefix = '' } = {}) {
+  if (!candidates || candidates.length === 0) return null
+  const target = normalizedPart || ''
+  const prefixed = normalizePart(prefix + ' ' + target)
+  const score = c => {
+    let s = 0
+    if (target && normalizePart(c.supplier_part_no) === target) s += 8
+    if (target && normalizePart(c.p21_item_id) === prefixed) s += 4
+    if (prefix && String(c.p21_item_id || '').startsWith(prefix)) s += 2
+    if (c.current_cost !== null && c.current_cost !== undefined) s += 1
+    return s
+  }
+  return [...candidates].sort((a, b) =>
+    score(b) - score(a) ||
+    String(a.p21_item_id || '').length - String(b.p21_item_id || '').length ||
+    String(a.p21_item_id || '').localeCompare(String(b.p21_item_id || ''))
+  )[0]
+}
+
 // Percent change old -> new cost, rounded to 2dp. Null when there's no usable
 // baseline (unknown or zero old cost).
 export function costChangePct(oldCost, newCost) {

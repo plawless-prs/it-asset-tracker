@@ -48,6 +48,13 @@ export function triggerMatch(supabase, batchId) {
   return postWithSession(supabase, '/api/priceupdates/match', { batch_id: batchId })
 }
 
+// Generate the P21 import file for an approved batch (Phase 5). Returns
+// { export, row_count, file_name, signedUrl } — signedUrl is a short-lived
+// download link for the generated .txt.
+export function generateExport(supabase, batchId) {
+  return postWithSession(supabase, '/api/priceupdates/export', { batch_id: batchId })
+}
+
 // Kick a manual P21 mirror sync (Settings "Sync now").
 export function syncP21(supabase) {
   return postWithSession(supabase, '/api/p21/sync-items', {})
