@@ -43,6 +43,15 @@ export default function HomePage() {
       status: 'Active',
     },
     {
+      name: 'Price Update Processor',
+      appId: 'priceupdates',
+      description: 'Turn vendor price/cost emails into a clean, P21-ready import file: intake, parse spreadsheets, match against Prophet 21 items, and review with guardrails before export.',
+      href: '/priceupdates',
+      icon: '🧾',
+      color: '#059669',
+      status: 'Active',
+    },
+    {
       name: 'Daily Ops',
       appId: 'dailyops',
       description: 'Run daily SOP checklists and track one-off operational tasks for the IT team.',

@@ -70,6 +70,19 @@ export default function Navigation() {
       ],
     },
     {
+      id: 'priceupdates',
+      appId: 'priceupdates',
+      label: 'Price Updates',
+      icon: '🧾',
+      basePath: '/priceupdates',
+      links: [
+        { href: '/priceupdates', label: 'Dashboard' },
+        { href: '/priceupdates/batches', label: 'Batches' },
+        { href: '/priceupdates/vendors', label: 'Vendors' },
+        { href: '/priceupdates/settings', label: 'Settings' },
+      ],
+    },
+    {
       id: 'dailyops',
       appId: 'dailyops',
       label: 'Daily Ops',
