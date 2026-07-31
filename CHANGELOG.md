@@ -2,6 +2,10 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-07-31
+
+- **Price Update Processor — match route only saw the first 1,000 lines (fixed):** the `pu_lines` fetch in `/api/priceupdates/match` wasn't paginated, so PostgREST's 1,000-row cap silently limited matching on large files (a real 18,671-line Gates file matched only 928). Now pages like the mirror fetch. Also set Gates' `p21_item_prefix` to `"GAT "`. Verified: same batch now matches 16,634 — in line with the manually-established ground truth (~2k unmatched lines confirmed absent from P21 in any format).
+
 ## 2026-07-30
 
 - **Price Update Processor — P21 mirror sync unblocked via SQL replica:** the item-mirror sync now reads Epicor's hosted **read-only SQL Server replica** (new server-only client `src/lib/p21sql.js`, `mssql` dep, `P21_SQL_*` env) instead of the OData API, which remains 401-blocked at the gateway (diagnosed: token + catalog + $metadata OK for two users **and** a registered `/odata`-scope consumer key, but every data query denied — Epicor-side grant still pending). `/api/p21/sync-items` auto-prefers SQL when configured and keeps OData as the fallback; one joined query per supplier (same views/fields, env-overridable, columns verified against the replica), paged 5k with chunked deduped upserts. Replaced the placeholder seed `pu_vendors.p21_supplier_id`s with the real ones looked up in the replica (Gates 10638, ContiTech 10629, Parker 10140). **Verified live: full sync upserted 71,503 mirror rows in ~27s.** The replica is publicly reachable, so the nightly Vercel cron architecture stands. Also: Next.js bumped to 16.2.12; `SETUP-NEW-MACHINE.md` gained the git-identity step.

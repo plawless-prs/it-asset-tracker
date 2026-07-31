@@ -42,9 +42,22 @@ export async function POST(req) {
   const { data: settings } = await admin.from('pu_settings').select('*').eq('id', 1).single()
   const cfg = settings || { large_increase_pct: 20, flag_decreases: true, flag_cost_over_list: true }
 
-  const { data: lines } = await admin
-    .from('pu_lines').select('id, vendor_item_no, new_cost, new_list').eq('batch_id', batchId)
-  if (!lines || lines.length === 0) {
+  // Page the lines fetch — PostgREST caps un-ranged selects at 1000 rows, and
+  // real vendor files run to tens of thousands of lines.
+  const lines = []
+  {
+    const PAGE = 1000
+    for (let from = 0; ; from += PAGE) {
+      const { data: rows, error } = await admin
+        .from('pu_lines').select('id, vendor_item_no, new_cost, new_list')
+        .eq('batch_id', batchId).order('id').range(from, from + PAGE - 1)
+      if (error) return Response.json({ ok: false, error: error.message }, { status: 500 })
+      if (!rows || rows.length === 0) break
+      lines.push(...rows)
+      if (rows.length < PAGE) break
+    }
+  }
+  if (lines.length === 0) {
     return Response.json({ ok: true, total: 0, matched: 0, unmatched: 0, ambiguous: 0, flagged: 0, note: 'no lines to match' })
   }
 
