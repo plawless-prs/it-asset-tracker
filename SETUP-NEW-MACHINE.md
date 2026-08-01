@@ -58,6 +58,15 @@ it in `~\.local\bin`):
    ```
    Then open a fresh terminal (or sign out/in) and retry.
 
+## 4b. (Optional but useful) GitHub CLI
+
+`gh` lets Claude Code check PRs, deploy statuses, and the GitHub API.
+
+```powershell
+winget install GitHub.cli
+gh auth login        # browser flow, pick HTTPS
+```
+
 ## 5. (Optional) Claude Code VS Code extension
 
 CLI-only is fine — you can run `claude` in VS Code's integrated terminal. If you
