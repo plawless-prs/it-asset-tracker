@@ -24,7 +24,7 @@ export default function NewBatchModal({ onClose, onCreated }) {
     async function load() {
       const { data } = await supabase
         .from('pu_vendors')
-        .select('id, name')
+        .select('id, name, p21_supplier_id')
         .eq('active', true)
         .order('name')
       setVendors(data || [])
@@ -87,6 +87,21 @@ export default function NewBatchModal({ onClose, onCreated }) {
           file_size: file.size,
         })
         if (fErr) throw fErr
+      }
+
+      // 4. Queue a supplier-scoped mirror sync so matching sees fresh P21 data
+      // by the time the reviewer gets there. Best-effort: the nightly full
+      // sync is the backstop, so a failure here must not block the batch.
+      const supplierId = vendors.find(v => v.id === resolvedVendorId)?.p21_supplier_id
+      if (supplierId) {
+        try {
+          const { data: { user } } = await supabase.auth.getUser()
+          await supabase.from('pu_sync_requests').insert({
+            supplier_id: String(supplierId),
+            reason: 'batch_created',
+            requested_by: user?.id || null,
+          })
+        } catch { /* ignore */ }
       }
 
       onCreated?.(batch)

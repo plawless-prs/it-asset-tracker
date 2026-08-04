@@ -55,21 +55,21 @@ export default function PriceUpdatesSettings() {
     return `Synced ${r.upserted?.toLocaleString?.() ?? r.upserted} rows${per ? ` (${per})` : ''}.`
   }
 
-  // Wait for the worker to clear the request and record a fresh result.
-  function pollForResult(requestedAt, deadline) {
+  // Wait for the worker to finish the queued request and record its result.
+  function pollForResult(requestId, deadline) {
     pollTimer.current = setTimeout(async () => {
-      const s = await load()
-      const r = s?.worker_last_result
-      const done = !s?.sync_requested_at && r && new Date(r.finished_at || 0) > new Date(requestedAt)
-      if (done) {
+      const { data: req } = await supabase.from('pu_sync_requests')
+        .select('status, result').eq('id', requestId).single()
+      if (req?.status === 'done' || req?.status === 'failed') {
+        await load()
         setSyncing(false)
-        if (r.ok) setResult(describeResult(r))
-        else setError(r.error || 'Sync failed')
+        if (req.result?.ok) setResult(describeResult(req.result))
+        else setError(req.result?.error || 'Sync failed')
       } else if (Date.now() > deadline) {
         setSyncing(false)
         setError('No result from the worker yet — it may be offline or mid-sync. Check back on this page in a minute.')
       } else {
-        pollForResult(requestedAt, deadline)
+        pollForResult(requestId, deadline)
       }
     }, 5000)
   }
@@ -77,11 +77,11 @@ export default function PriceUpdatesSettings() {
   async function handleSync() {
     setError(''); setResult(''); setTestOut(null)
     setSyncing(true)
-    const requestedAt = new Date().toISOString()
     const { data: { user } } = await supabase.auth.getUser()
-    const { error: e } = await supabase.from('pu_settings')
-      .update({ sync_requested_at: requestedAt, sync_requested_by: user?.id || null })
-      .eq('id', 1)
+    const { data: req, error: e } = await supabase.from('pu_sync_requests')
+      .insert({ reason: 'manual', requested_by: user?.id || null })
+      .select('id')
+      .single()
     if (e) {
       setSyncing(false)
       setError(e.message || 'Could not request a sync')
@@ -92,7 +92,7 @@ export default function PriceUpdatesSettings() {
       setResult('Sync requested. The worker looks offline right now — it will run the sync when it next checks in.')
       return
     }
-    pollForResult(requestedAt, Date.now() + 5 * 60 * 1000)
+    pollForResult(req.id, Date.now() + 10 * 60 * 1000)
   }
 
   async function handleTest() {

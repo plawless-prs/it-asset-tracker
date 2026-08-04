@@ -11,15 +11,26 @@ Everything here is **outbound-only**: the worker connects out to the replica
 
 ## Modes
 
-- `node sync-worker.mjs --once` — one full sync, then exit. Run nightly.
-- `node sync-worker.mjs --watch` — long-running. Polls the `pu_settings` row
-  every `POLL_SECONDS` (default 60): stamps `worker_heartbeat_at` (the app's
-  Settings page uses this to show the worker as online) and runs a sync when
-  the app has set `sync_requested_at` ("Sync now" button).
+- `node sync-worker.mjs --once` — one full sync (all tracked suppliers), then
+  exit. Run nightly — this is the backstop that keeps everything current.
+- `node sync-worker.mjs --watch` — long-running. Every `POLL_SECONDS` (default
+  60) it stamps `pu_settings.worker_heartbeat_at` (the app's Settings page
+  uses this to show the worker as online) and drains the `pu_sync_requests`
+  queue: the app enqueues a **supplier-scoped** request when a batch is
+  created (so matching sees fresh data for that vendor) and an
+  **all-suppliers** request from Settings "Sync now". Pending requests are
+  coalesced — one sync run covers however many requests are waiting — and each
+  request row gets the result written back (`status`: `pending → running →
+  done`/`failed`).
+
+With a growing supplier list, scoped syncs stay seconds-fast while the nightly
+full sync absorbs the bulk. Consider setting `POLL_SECONDS=20` in `.env` so
+batch-created syncs land before the reviewer reaches the matching step.
 
 ## Setup (Windows server)
 
-Requires the `14_p21_sync_worker.sql` migration to have been run in Supabase.
+Requires migrations `14_p21_sync_worker.sql` and `15_pu_sync_requests.sql` to
+have been run in Supabase.
 
 1. Install Node.js 20+ (LTS installer from nodejs.org).
 2. Copy this `worker/` folder to the server (e.g. `C:\p21-sync-worker\`) —
@@ -64,11 +75,18 @@ POLL_SECONDS=60
 The `P21_SUPPLIER_VIEW` / `P21_ITEM_VIEW` / `P21_F_*` overrides from
 `AGENTS.md` are honored too, if ever needed.
 
+## Updating the worker on the server
+
+When `sync-worker.mjs` changes in the repo, copy the new file over the server's
+copy, then restart the watcher task (Task Scheduler → right-click → End, then
+Run). `npm install` only needs re-running if `package.json` changed.
+
 ## How it relates to the app
 
 - Same query and upsert semantics as `src/app/api/p21/sync-items/route.js`
   (which remains in the app as a fallback, e.g. if Epicor ever allowlists
   Vercel). The script is intentionally self-contained — the app's `src/lib`
   modules are Next-flavored ESM that plain Node can't import.
-- Coordination columns on `pu_settings` (row `id=1`): `sync_requested_at`,
-  `sync_requested_by`, `worker_heartbeat_at`, `worker_last_result`.
+- Coordination: the `pu_sync_requests` queue table (app inserts, worker claims
+  and resolves), plus `worker_heartbeat_at` / `worker_last_result` on
+  `pu_settings` (row `id=1`) for the Settings-page status pill.

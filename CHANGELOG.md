@@ -2,6 +2,10 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-08-04
+
+- **Price Update Processor — supplier-scoped sync queue (migration `15`):** creating a batch now auto-queues a P21 mirror sync for just that vendor's supplier (new `pu_sync_requests` table; the worker's `--watch` loop drains it, coalescing pending requests), so reviewers no longer need to click Sync now first — batch detail shows "P21 data synced Xm ago" next to Re-run matching. Settings "Sync now" goes through the same queue (all suppliers) and reads its result off the request row; the migration-`14` single-flag columns are dropped. Built scoped-first because the supplier list is headed for ~150+, where on-demand full syncs would be too heavy. **Run `15_pu_sync_requests.sql` and update `sync-worker.mjs` on the office server** (copy file, restart watcher task).
+
 ## 2026-08-03
 
 - **P21 mirror sync moved to an on-prem worker (migration `14`):** the Epicor SQL replica turned out to be IP-allowlisted (office network only — every Vercel attempt 502'd in ~16s, incl. all nightly crons since deploy; mirror had been stale since 7/30). New self-contained `worker/sync-worker.mjs` runs on an office server: nightly `--once` via Task Scheduler + a `--watch` loop that picks up Settings "Sync now" requests through new `pu_settings` columns (`sync_requested_at`, `worker_heartbeat_at`, `worker_last_result`). Settings shows worker online/offline; the Vercel sync cron was removed (`/api/p21/sync-items` stays as fallback, exercised by Test connection). **Run `14_p21_sync_worker.sql` and set up the worker per `worker/README.md`.**

@@ -9,9 +9,12 @@
 //
 // Modes:
 //   node sync-worker.mjs --once    run one full sync and exit (nightly task)
-//   node sync-worker.mjs --watch   poll pu_settings every POLL_SECONDS for a
-//                                  "Sync now" request from the app; heartbeat
-//                                  each poll so the UI can show worker status
+//   node sync-worker.mjs --watch   poll every POLL_SECONDS: heartbeat to
+//                                  pu_settings (the UI's online pill) and
+//                                  drain the pu_sync_requests queue — the app
+//                                  enqueues supplier-scoped requests on batch
+//                                  creation and all-supplier requests from
+//                                  Settings "Sync now"
 //
 // Config comes from worker/.env (KEY=VALUE lines; see README.md). Required:
 //   P21_SQL_HOST, P21_SQL_DATABASE, P21_SQL_USERNAME, P21_SQL_PASSWORD,
@@ -85,8 +88,6 @@ async function sb(method, path, body, headers = {}) {
   return text ? JSON.parse(text) : null
 }
 
-const getSettings = () =>
-  sb('GET', 'pu_settings?id=eq.1&select=sync_requested_at,worker_heartbeat_at').then(rows => rows?.[0] || {})
 const patchSettings = (patch) => sb('PATCH', 'pu_settings?id=eq.1', patch)
 
 // --- P21 SQL replica -------------------------------------------------------
@@ -164,12 +165,18 @@ async function upsertMirror(rows) {
   return deduped.length
 }
 
-async function runSync(via) {
+// scope: null/undefined = all tracked suppliers; or an array of supplier ids.
+async function runSync(via, scope = null) {
   const startedAt = new Date().toISOString()
-  console.log(`[${startedAt}] sync starting (${via})`)
+  console.log(`[${startedAt}] sync starting (${via}${scope ? `, suppliers: ${scope.join(', ')}` : ', all suppliers'})`)
 
-  const vends = await sb('GET', 'pu_vendors?select=p21_supplier_id&p21_supplier_id=not.is.null')
-  const supplierIds = [...new Set((vends || []).map(v => String(v.p21_supplier_id).trim()).filter(Boolean))]
+  let supplierIds
+  if (scope) {
+    supplierIds = [...new Set(scope.map(s => String(s).trim()).filter(Boolean))]
+  } else {
+    const vends = await sb('GET', 'pu_vendors?select=p21_supplier_id&p21_supplier_id=not.is.null')
+    supplierIds = [...new Set((vends || []).map(v => String(v.p21_supplier_id).trim()).filter(Boolean))]
+  }
   if (supplierIds.length === 0) {
     const result = { ok: true, via, upserted: 0, note: 'No vendors have a P21 supplier id set — nothing to sync.', started_at: startedAt, finished_at: new Date().toISOString() }
     console.log(result.note)
@@ -200,10 +207,10 @@ async function runSync(via) {
   return result
 }
 
-async function syncAndRecord(via) {
+async function syncAndRecord(via, scope = null) {
   let result
   try {
-    result = await runSync(via)
+    result = await runSync(via, scope)
   } catch (e) {
     result = { ok: false, via, error: String(e?.message || e), finished_at: new Date().toISOString() }
     console.error(`sync failed: ${result.error}`)
@@ -214,6 +221,29 @@ async function syncAndRecord(via) {
     console.error(`could not record result in pu_settings: ${String(e?.message || e)}`)
   }
   return result
+}
+
+// Drain pu_sync_requests: claim everything pending, then run the minimum set
+// of syncs that covers it — one full sync if any request is unscoped,
+// otherwise one scoped sync over the distinct supplier ids. Every claimed
+// request gets the shared result.
+async function drainQueue() {
+  const pending = await sb('GET', 'pu_sync_requests?status=eq.pending&select=id,supplier_id,reason&order=requested_at.asc')
+  if (!pending?.length) return false
+
+  const ids = pending.map(r => r.id)
+  const idFilter = `id=in.(${ids.join(',')})`
+  await sb('PATCH', `pu_sync_requests?${idFilter}&status=eq.pending`,
+    { status: 'running', started_at: new Date().toISOString() })
+
+  const wantsAll = pending.some(r => !r.supplier_id)
+  const scope = wantsAll ? null : [...new Set(pending.map(r => r.supplier_id))]
+  console.log(`picked up ${pending.length} request(s) (${pending.map(r => r.reason).join(', ')})`)
+
+  const result = await syncAndRecord(wantsAll ? 'worker-manual' : 'worker-batch', scope)
+  await sb('PATCH', `pu_sync_requests?${idFilter}`,
+    { status: result.ok ? 'done' : 'failed', finished_at: new Date().toISOString(), result })
+  return true
 }
 
 // --- modes -----------------------------------------------------------------
@@ -230,18 +260,12 @@ if (mode === 'once') {
   process.exit(result.ok ? 0 : 1)
 }
 
-// watch: heartbeat every poll; run a sync when the app sets sync_requested_at.
+// watch: heartbeat every poll; drain any queued sync requests.
 console.log(`watching for sync requests (every ${POLL_SECONDS}s)…`)
 while (true) {
   try {
-    const s = await getSettings()
-    if (s.sync_requested_at) {
-      console.log(`sync requested at ${s.sync_requested_at} — picking it up`)
-      await patchSettings({ sync_requested_at: null, worker_heartbeat_at: new Date().toISOString() })
-      await syncAndRecord('worker-manual')
-    } else {
-      await patchSettings({ worker_heartbeat_at: new Date().toISOString() })
-    }
+    const ranSync = await drainQueue()
+    if (!ranSync) await patchSettings({ worker_heartbeat_at: new Date().toISOString() })
   } catch (e) {
     console.error(`poll error: ${String(e?.message || e)}`)
   }

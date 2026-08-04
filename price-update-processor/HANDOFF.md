@@ -27,16 +27,19 @@ plan), `../AGENTS.md` (architecture), and `../CHANGELOG.md` (what changed).
   attempt 502'd in ~16s; the cron never once succeeded). Sync moved to
   `worker/sync-worker.mjs` (self-contained Node script, commit `22fadfa` +
   migration `14`) running on an office server at **`C:\p21-sync-worker`** with
-  two Task Scheduler jobs: nightly 1:00 AM `--once`, and an at-startup
-  `--watch` loop that heartbeats to `pu_settings` and services the Settings
-  "Sync now" button (app sets `sync_requested_at`, worker syncs and writes
-  `worker_last_result`). Settings shows the worker Online/Offline from the
-  heartbeat — **Offline is the early-warning sign the server task died.**
-  Secrets live in `worker/.env` on that server (git-ignored). Verified
-  end-to-end in production 2026-08-04: 71,505 rows in ~26s (ContiTech 10629:
-  38,229 · Parker 10140: 4,809 · Gates 10638: 28,467). Syncs always cover
-  **all** tracked suppliers; nothing syncs on batch creation — nightly +
-  on-demand only. `/api/p21/sync-items` (`src/lib/p21sql.js`) remains as the
+  two Task Scheduler jobs: nightly 1:00 AM `--once` (full sync, the backstop),
+  and an at-startup `--watch` loop that heartbeats to `pu_settings` and drains
+  the **`pu_sync_requests` queue** (migration `15`, 2026-08-04): **creating a
+  batch auto-queues a supplier-scoped sync for that vendor** (batch detail
+  shows "P21 data synced Xm ago"), and Settings "Sync now" queues an
+  all-suppliers request. Scoped-first design because the supplier list is
+  headed for ~150+, where on-demand full syncs would be too heavy. Settings
+  shows the worker Online/Offline from the heartbeat — **Offline is the
+  early-warning sign the server task died.** Secrets live in `worker/.env` on
+  that server (git-ignored). Verified end-to-end in production 2026-08-04:
+  71,505 rows in ~26s (ContiTech 10629: 38,229 · Parker 10140: 4,809 · Gates
+  10638: 28,467). When `sync-worker.mjs` changes, copy it to the server and
+  restart the watcher task. `/api/p21/sync-items` (`src/lib/p21sql.js`) remains as the
   in-app fallback, exercised by Settings "Test connection" — expected to fail
   unless Epicor ever allowlists Vercel's IPs (worth an EpicCare ask someday;
   zero urgency).
@@ -59,7 +62,7 @@ plan), `../AGENTS.md` (architecture), and `../CHANGELOG.md` (what changed).
 4. **(Optional, testing only)** copy the git-ignored real data files — they don't
    travel with the repo either: `price-update-processor/samples/GAT2026.txt`
    (real Gates import sample, used to shape the Phase 5 exporter).
-5. **Supabase is cloud and shared** — migrations `01`–`14` are already applied to
+5. **Supabase is cloud and shared** — migrations `01`–`15` are already applied to
    the project; nothing to re-run on a new device. (Only if pointing at a *fresh*
    Supabase project: run every `supabase/*.sql` in numbered order.)
 6. `npm run dev`.

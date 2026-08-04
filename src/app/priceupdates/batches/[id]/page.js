@@ -68,6 +68,7 @@ export default function BatchDetail() {
   const [applying, setApplying] = useState(false)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
+  const [mirrorSyncedAt, setMirrorSyncedAt] = useState(null)
 
   const editable = batch && ['received', 'parsing', 'needs_review', 'failed'].includes(batch.status)
 
@@ -97,6 +98,16 @@ export default function BatchDetail() {
       const { data: s } = await supabase.from('pu_settings').select('*').eq('id', 1).single()
       setSettings(s || {})
     }
+    // How fresh is the mirror for this batch's supplier? (Batch creation
+    // queues a supplier-scoped sync on the on-prem worker; this shows whether
+    // it has landed.)
+    if (b?.vendor?.p21_supplier_id) {
+      const { data: m } = await supabase
+        .from('p21_item_mirror').select('last_synced_at')
+        .eq('supplier_id', String(b.vendor.p21_supplier_id))
+        .order('last_synced_at', { ascending: false }).limit(1)
+      setMirrorSyncedAt(m?.[0]?.last_synced_at || null)
+    } else setMirrorSyncedAt(null)
     setLoading(false)
     return b
   }
@@ -458,6 +469,11 @@ export default function BatchDetail() {
           <span style={{ fontSize: '13px', color: '#5a6e84' }}>{batch.vendor?.name || 'Unidentified vendor'}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {mirrorSyncedAt && editable && (
+            <span title="When this vendor's P21 mirror data was last refreshed (a sync is queued automatically when a batch is created)" style={{ fontSize: '11.5px', color: '#5a6e84', whiteSpace: 'nowrap' }}>
+              P21 data synced {relativeTime(mirrorSyncedAt)}
+            </span>
+          )}
           {counts.all > 0 && editable && (
             <button onClick={rematch} disabled={matching} style={{
               padding: '6px 13px', borderRadius: '8px', fontSize: '12px', fontWeight: '600',
