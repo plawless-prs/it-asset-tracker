@@ -1,6 +1,5 @@
 {
   "crons": [
-    { "path": "/api/helpdesk/graph-subscribe", "schedule": "0 6 * * *" },
-    { "path": "/api/p21/sync-items", "schedule": "0 7 * * *" }
+    { "path": "/api/helpdesk/graph-subscribe", "schedule": "0 6 * * *" }
   ]
 }

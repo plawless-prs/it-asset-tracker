@@ -2,6 +2,10 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-08-03
+
+- **P21 mirror sync moved to an on-prem worker (migration `14`):** the Epicor SQL replica turned out to be IP-allowlisted (office network only — every Vercel attempt 502'd in ~16s, incl. all nightly crons since deploy; mirror had been stale since 7/30). New self-contained `worker/sync-worker.mjs` runs on an office server: nightly `--once` via Task Scheduler + a `--watch` loop that picks up Settings "Sync now" requests through new `pu_settings` columns (`sync_requested_at`, `worker_heartbeat_at`, `worker_last_result`). Settings shows worker online/offline; the Vercel sync cron was removed (`/api/p21/sync-items` stays as fallback, exercised by Test connection). **Run `14_p21_sync_worker.sql` and set up the worker per `worker/README.md`.**
+
 ## 2026-07-31
 
 - **`src/middleware.js` → `src/proxy.js`:** migrated to Next 16's renamed convention (exported fn `middleware` → `proxy`; matcher/logic unchanged) — clears the dev-server deprecation warning. Public webhook routes must now be excluded in `proxy.js`'s matcher.

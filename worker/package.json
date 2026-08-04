@@ -1,0 +1,13 @@
+{
+  "name": "p21-sync-worker",
+  "private": true,
+  "type": "module",
+  "description": "On-prem P21 mirror sync worker for the Price Update Processor (runs where Epicor's SQL replica is reachable).",
+  "scripts": {
+    "once": "node sync-worker.mjs --once",
+    "watch": "node sync-worker.mjs --watch"
+  },
+  "dependencies": {
+    "mssql": "^12.7.0"
+  }
+}

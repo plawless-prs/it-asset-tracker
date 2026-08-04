@@ -55,12 +55,9 @@ export function generateExport(supabase, batchId) {
   return postWithSession(supabase, '/api/priceupdates/export', { batch_id: batchId })
 }
 
-// Kick a manual P21 mirror sync (Settings "Sync now").
-export function syncP21(supabase) {
-  return postWithSession(supabase, '/api/p21/sync-items', {})
-}
-
-// Prove the P21 connection + view/field names without writing anything.
+// Prove the Vercel→P21 connection + view/field names without writing anything.
+// This is the fallback path only — real syncs run on the on-prem worker
+// (worker/), requested via pu_settings.sync_requested_at.
 export function testP21(supabase) {
   return postWithSession(supabase, '/api/p21/sync-items', { test: true })
 }
