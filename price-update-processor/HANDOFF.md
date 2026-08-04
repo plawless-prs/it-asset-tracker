@@ -36,10 +36,17 @@ plan), `../AGENTS.md` (architecture), and `../CHANGELOG.md` (what changed).
   headed for ~150+, where on-demand full syncs would be too heavy. Settings
   shows the worker Online/Offline from the heartbeat — **Offline is the
   early-warning sign the server task died.** Secrets live in `worker/.env` on
-  that server (git-ignored). Verified end-to-end in production 2026-08-04:
-  71,505 rows in ~26s (ContiTech 10629: 38,229 · Parker 10140: 4,809 · Gates
-  10638: 28,467). When `sync-worker.mjs` changes, copy it to the server and
-  restart the watcher task. `/api/p21/sync-items` (`src/lib/p21sql.js`) remains as the
+  that server (git-ignored). **Both sync paths verified in production
+  2026-08-04:** full sync 71,505 rows in ~26s (ContiTech 10629: 38,229 ·
+  Parker 10140: 4,809 · Gates 10638: 28,467), and the batch-created scoped
+  path (Gates batch → `batch_created` request for supplier 10638 → worker
+  synced only Gates → detail header showed the freshness line). Note the
+  scoped trigger only fires if the vendor **already has a `p21_supplier_id`**
+  when the batch is created — new-vendor onboarding is: create vendor → set
+  its supplier id on the Vendors page → first batch's scoped sync populates
+  the mirror for that supplier automatically. When `sync-worker.mjs` changes,
+  copy it to the server and restart the watcher task (a request stranded
+  `running` by a killed worker self-requeues after 10 min). `/api/p21/sync-items` (`src/lib/p21sql.js`) remains as the
   in-app fallback, exercised by Settings "Test connection" — expected to fail
   unless Epicor ever allowlists Vercel's IPs (worth an EpicCare ask someday;
   zero urgency).
