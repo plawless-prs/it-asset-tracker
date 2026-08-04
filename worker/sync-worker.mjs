@@ -227,7 +227,19 @@ async function syncAndRecord(via, scope = null) {
 // of syncs that covers it — one full sync if any request is unscoped,
 // otherwise one scoped sync over the distinct supplier ids. Every claimed
 // request gets the shared result.
+const STALE_RUNNING_MINUTES = 10
+
 async function drainQueue() {
+  // Crash recovery: a request claimed by a worker that died mid-sync stays
+  // 'running' forever (only 'pending' rows get claimed). Requeue any that are
+  // implausibly old — syncs are idempotent, so re-running is safe.
+  const staleBefore = new Date(Date.now() - STALE_RUNNING_MINUTES * 60000).toISOString()
+  const requeued = await sb('PATCH',
+    `pu_sync_requests?status=eq.running&started_at=lt.${staleBefore}`,
+    { status: 'pending', started_at: null },
+    { Prefer: 'return=representation' })
+  if (requeued?.length) console.log(`requeued ${requeued.length} request(s) stranded by an earlier crash`)
+
   const pending = await sb('GET', 'pu_sync_requests?status=eq.pending&select=id,supplier_id,reason&order=requested_at.asc')
   if (!pending?.length) return false
 
