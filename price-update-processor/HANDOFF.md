@@ -3,7 +3,7 @@
 Snapshot so work can resume on another machine. Pairs with `build-spec.md` (the
 plan), `../AGENTS.md` (architecture), and `../CHANGELOG.md` (what changed).
 
-## Where things stand (2026-07-31)
+## Where things stand (2026-08-04)
 
 - **Phases 1–5 are built, and the P21 data pull is WORKING** via the SQL
   replica (see below). Phase 4 (two-pane review/approve UI) and Phase 5
@@ -17,20 +17,29 @@ plan), `../AGENTS.md` (architecture), and `../CHANGELOG.md` (what changed).
   named `<vendor prefix><effective year>.txt`; blank cell = "no change" in P21.
   **Not yet verified against a real P21 import load** — do that before trusting
   the loop end-to-end.
-- **Merged to `main` and deployed to production 2026-07-31** (P21 SQL env vars
-  were added to Vercel first). The `priceupdates-phase-3` branch history is in
-  `main`; continue new work on fresh branches off `main`. Watch the first
-  nightly `/api/p21/sync-items` cron run (07:00 UTC) — it's the test of whether
-  Epicor IP-restricts the replica from Vercel's egress.
-- **Mirror fill — RESOLVED: the read-only SQL replica.** Epicor provisioned a
-  `readonly_*` SQL account; the replica (`p21us-read10.epicordistribution.com`,
-  db `az_131184_live`) is **publicly reachable over TLS**, so the Vercel-cron
-  architecture stands — no in-network runner needed. New client
-  `src/lib/p21sql.js`; `/api/p21/sync-items` auto-prefers SQL over OData.
-  **Verified live 2026-07-30: 71,503 rows upserted in ~27s** (Gates 10638:
-  28,467 · ContiTech 10629: 38,227 · Parker 10140: 4,809 — real supplier ids,
-  looked up in the replica, now set on `pu_vendors`). Production unknown:
-  whether Epicor IP-restricts the replica (first deployed cron run will tell).
+- **Merged to `main` and deployed to production 2026-07-31.** The
+  `priceupdates-phase-3` branch history is in `main`; continue new work on
+  fresh branches off `main`.
+- **Mirror sync — RESOLVED (again), now via an on-prem worker (2026-08-04).**
+  The nightly-cron question answered itself: **Epicor IP-allowlists the
+  replica** (`p21us-read10.epicordistribution.com`, db `az_131184_live`) —
+  reachable from the office network, **not from Vercel** (every production
+  attempt 502'd in ~16s; the cron never once succeeded). Sync moved to
+  `worker/sync-worker.mjs` (self-contained Node script, commit `22fadfa` +
+  migration `14`) running on an office server at **`C:\p21-sync-worker`** with
+  two Task Scheduler jobs: nightly 1:00 AM `--once`, and an at-startup
+  `--watch` loop that heartbeats to `pu_settings` and services the Settings
+  "Sync now" button (app sets `sync_requested_at`, worker syncs and writes
+  `worker_last_result`). Settings shows the worker Online/Offline from the
+  heartbeat — **Offline is the early-warning sign the server task died.**
+  Secrets live in `worker/.env` on that server (git-ignored). Verified
+  end-to-end in production 2026-08-04: 71,505 rows in ~26s (ContiTech 10629:
+  38,229 · Parker 10140: 4,809 · Gates 10638: 28,467). Syncs always cover
+  **all** tracked suppliers; nothing syncs on batch creation — nightly +
+  on-demand only. `/api/p21/sync-items` (`src/lib/p21sql.js`) remains as the
+  in-app fallback, exercised by Settings "Test connection" — expected to fail
+  unless Epicor ever allowlists Vercel's IPs (worth an EpicCare ask someday;
+  zero urgency).
 - **OData path (fallback, still gateway-blocked):** token auth + catalog +
   $metadata all work, but **every OData data query returns 401** ("You are not
   authorized to access API") — for two different users and even with a
@@ -41,27 +50,33 @@ plan), `../AGENTS.md` (architecture), and `../CHANGELOG.md` (what changed).
 
 ## New-device setup
 
-1. `git clone https://github.com/plawless-prs/it-asset-tracker.git`
-2. `git checkout priceupdates-phase-3`
-3. `npm install`
-4. **Recreate `.env.local`** — it is git-ignored and does **not** travel with the
+1. `git clone https://github.com/plawless-prs/it-asset-tracker.git` (work on
+   `main`; branch off it for new work)
+2. `npm install`
+3. **Recreate `.env.local`** — it is git-ignored and does **not** travel with the
    repo. Copy it securely from the old machine, or rebuild it from the key list
    below (values are secrets kept on the old device / in the respective consoles).
-5. **(Optional, testing only)** copy the git-ignored real data files — they don't
+4. **(Optional, testing only)** copy the git-ignored real data files — they don't
    travel with the repo either: `price-update-processor/samples/GAT2026.txt`
    (real Gates import sample, used to shape the Phase 5 exporter).
-6. **Supabase is cloud and shared** — migrations `01`–`13` are already applied to
+5. **Supabase is cloud and shared** — migrations `01`–`14` are already applied to
    the project; nothing to re-run on a new device. (Only if pointing at a *fresh*
    Supabase project: run every `supabase/*.sql` in numbered order.)
-7. `npm run dev`.
+6. `npm run dev`.
+
+The **on-prem sync worker** is separate from dev machines — it lives on the
+office server (`C:\p21-sync-worker`, see `worker/README.md`) and keeps running
+regardless of which dev machine is in use. Nothing to set up per-device.
 
 ## `.env.local` keys (names only — bring the secret values from the old device)
 
 - **Supabase:** `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
   `SUPABASE_SERVICE_ROLE_KEY`
-- **P21 SQL replica (the working sync source):** `P21_SQL_HOST`, `P21_SQL_PORT`,
-  `P21_SQL_DATABASE`, `P21_SQL_USERNAME`, `P21_SQL_PASSWORD` (Epicor-provisioned
-  `readonly_*` account).
+- **P21 SQL replica:** `P21_SQL_HOST`, `P21_SQL_PORT`, `P21_SQL_DATABASE`,
+  `P21_SQL_USERNAME`, `P21_SQL_PASSWORD` (Epicor-provisioned `readonly_*`
+  account). The production copy of these lives in `worker/.env` on the office
+  server — the dev-machine copy only matters for local testing (works from the
+  office network only; Epicor IP-allowlists the replica).
 - **P21 OData (fallback, currently gateway-blocked):** `P21_BASE_URL`
   (= `https://powerandrubber-play.epicordistribution.com`), `P21_USERNAME`,
   `P21_PASSWORD`, `P21_CONSUMER_KEY` (registered app `PRS-PriceUpdates`), plus
