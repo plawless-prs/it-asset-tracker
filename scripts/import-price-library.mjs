@@ -97,13 +97,19 @@ function* walk(dir, rel = []) {
 
 // --- main ------------------------------------------------------------------
 
-const vendors = await sb('GET', '/rest/v1/pu_vendors?select=id,name')
+const vendors = await sb('GET', '/rest/v1/pu_vendors?select=id,name,p21_supplier_id')
 const byNorm = new Map(vendors.map(v => [norm(v.name), v]))
+const bySupplierId = new Map(vendors.filter(v => v.p21_supplier_id)
+  .map(v => [String(v.p21_supplier_id).trim(), v]))
 
-// Exact normalized match first; otherwise a folder that's an unambiguous
-// prefix of one vendor (or vice versa) matches too — archives tend to use
-// shorthand like "Parker" for "Parker Hannifin". Ambiguity = no match.
+// Resolution order: (1) a leading P21 supplier id on the folder name (e.g.
+// "10638 Gates") — exact and unambiguous, the best escape hatch for folders
+// whose names won't match; (2) exact normalized name; (3) a folder that's an
+// unambiguous prefix of one vendor name (or vice versa) — archives tend to
+// use shorthand like "Parker" for "Parker Hannifin". Ambiguity = no match.
 function matchVendor(folderName) {
+  const idPrefix = folderName.trim().match(/^(\d+)\b/)
+  if (idPrefix && bySupplierId.has(idPrefix[1])) return bySupplierId.get(idPrefix[1])
   const n = norm(folderName)
   if (byNorm.has(n)) return byNorm.get(n)
   const candidates = vendors.filter(v => {
