@@ -69,6 +69,7 @@ export default function BatchDetail() {
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const [mirrorSyncedAt, setMirrorSyncedAt] = useState(null)
+  const [libraryFiles, setLibraryFiles] = useState([])
 
   const editable = batch && ['received', 'parsing', 'needs_review', 'failed'].includes(batch.status)
 
@@ -88,6 +89,11 @@ export default function BatchDetail() {
       .select('id, file_name, storage_path, row_count, created_at, creator:created_by(full_name, email)')
       .eq('batch_id', id).order('created_at', { ascending: false })
     setExports(ex || [])
+    const { data: lib } = await supabase
+      .from('pu_library_files')
+      .select('id, file_name, storage_path, year, created_at')
+      .eq('batch_id', id).order('created_at', { ascending: false })
+    setLibraryFiles(lib || [])
     if (b?.vendor_id) {
       const { data: p } = await supabase
         .from('pu_parse_profiles').select('id, label, config, created_at')
@@ -729,6 +735,20 @@ export default function BatchDetail() {
                     {e.creator ? ` · ${e.creator.full_name || e.creator.email}` : ''}
                   </div>
                   <button onClick={() => downloadExport(e)} style={miniBtn('#1e2a3a', '#8aa0b8')}>Download</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Library files linked to this batch (Phase 5.5) */}
+          {libraryFiles.length > 0 && (
+            <div style={{ backgroundColor: '#0f1620', border: '1px solid #182030', borderRadius: '14px', padding: '14px 16px' }}>
+              <div style={{ fontSize: '12px', fontWeight: '600', color: '#c0cad8', marginBottom: '10px' }}>Library files ({libraryFiles.length})</div>
+              {libraryFiles.map(f => (
+                <div key={f.id} style={{ marginBottom: '10px' }}>
+                  <div style={{ fontSize: '12px', color: '#d0d8e4', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.file_name}>{f.file_name}</div>
+                  <div style={{ fontSize: '11px', color: '#5a6e84', margin: '2px 0 5px' }}>{f.year || ''}{f.year ? ' · ' : ''}{relativeTime(f.created_at)}</div>
+                  <button onClick={() => downloadFile(f)} style={miniBtn('#1e2a3a', '#8aa0b8')}>Download</button>
                 </div>
               ))}
             </div>

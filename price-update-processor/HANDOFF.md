@@ -100,19 +100,19 @@ that way.
 
 ## To resume
 
-- **Next up is Phase 5.5 (decided 2026-07-31, not in the original build-spec):
-  a price-file library in the app, stored in Supabase Storage.** Porter's
-  historical price-file archive currently lives in folders on the office PC;
-  decision made to house it in the existing private `price-files` bucket
-  (already holds batch files + exports; auth/policies already in place; ~100 GB
-  included on Supabase Pro — plenty, these are small spreadsheets) rather than
-  a self-hosted file server or NAS. Rough scope agreed: a bulk-upload path for
-  the historical archive (possibly a script walking the local folder tree), a
-  `vendor/year/` object-key convention, and a Files/library page in the Price
-  Updates app (browse/search/download; link files to their batches where
-  known). Not started — spec it, confirm scope with Porter, then build.
-  **The local archive itself is on the office PC** — bulk-upload work needs
-  either that machine or the folders copied over.
+- **Phase 5.5 (price-file library) — BUILT 2026-08-04 (migration `16`), one
+  step outstanding: running the bulk import.** `/priceupdates/files` page
+  (browse/filter/search, in-app upload, vendor/year metadata editing, batch
+  linking — linked files show on batch detail); objects in `price-files` under
+  `library/<vendor-slug>/<year>/`, metadata in `pu_library_files`.
+  **Remaining: run `scripts/import-price-library.mjs` on the PC that holds the
+  historical archive** (folder-per-vendor layout confirmed with Porter;
+  dependency-free — copy the script + a `.env` with `SUPABASE_URL` +
+  `SUPABASE_SERVICE_ROLE_KEY`, then `node import-price-library.mjs
+  "<archive path>" --dry` to preview, and again without `--dry` to import;
+  idempotent, so partial runs can just be re-run). Vendor folders that don't
+  match a `pu_vendors.name` import as Unassigned — fix on the Files page, or
+  add the vendor and re-run.
 - After 5.5, remaining build-spec phases: **6** email intake from
   `priceupdate@` · **7** polish. Porter explicitly wants 5.5 before Phase 6.
 - Also outstanding: round-trip a generated export through P21's real import

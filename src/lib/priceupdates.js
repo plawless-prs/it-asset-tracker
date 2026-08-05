@@ -84,6 +84,14 @@ export function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+// "148 KB" / "2.4 MB"
+export function formatBytes(n) {
+  if (n == null) return '—'
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
 // "22 min ago" / "3h ago" / "2d ago" / "Jul 3" (copied from lib/helpdesk.js).
 export function relativeTime(dateStr) {
   if (!dateStr) return '—'

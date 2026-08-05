@@ -4,6 +4,7 @@ Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYY
 
 ## 2026-08-04
 
+- **Price Update Processor — Phase 5.5, price-file library (migration `16`):** new `/priceupdates/files` page (browse/filter/search, upload, vendor/year metadata editing, link files to batches — linked files appear on batch detail). Files live in the `price-files` bucket under `library/<vendor>/<year>/`, metadata in the new `pu_library_files` table. The historical office-PC archive bulk-imports via `scripts/import-price-library.mjs` (dependency-free; folder-per-vendor layout, year inferred, idempotent, `--dry` preview). **Run `16_pu_library_files.sql`.**
 - **Price Update Processor — supplier-scoped sync queue (migration `15`):** creating a batch now auto-queues a P21 mirror sync for just that vendor's supplier (new `pu_sync_requests` table; the worker's `--watch` loop drains it, coalescing pending requests), so reviewers no longer need to click Sync now first — batch detail shows "P21 data synced Xm ago" next to Re-run matching. Settings "Sync now" goes through the same queue (all suppliers) and reads its result off the request row; the migration-`14` single-flag columns are dropped. Built scoped-first because the supplier list is headed for ~150+, where on-demand full syncs would be too heavy. **Run `15_pu_sync_requests.sql` and update `sync-worker.mjs` on the office server** (copy file, restart watcher task).
 
 ## 2026-08-03

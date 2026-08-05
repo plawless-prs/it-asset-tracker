@@ -9,6 +9,7 @@ const RAIL = [
   { href: '/priceupdates',          label: 'Dashboard', icon: '▦', match: (p) => p === '/priceupdates' },
   { href: '/priceupdates/batches',  label: 'Batches',   icon: '🧾', match: (p) => p.startsWith('/priceupdates/batches') },
   { href: '/priceupdates/vendors',  label: 'Vendors',   icon: '🏷', match: (p) => p.startsWith('/priceupdates/vendors') },
+  { href: '/priceupdates/files',    label: 'Files',     icon: '📁', match: (p) => p.startsWith('/priceupdates/files') },
   { href: '/priceupdates/settings', label: 'Settings',  icon: '⚙', match: (p) => p.startsWith('/priceupdates/settings') },
 ]
 
