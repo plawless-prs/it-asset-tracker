@@ -45,7 +45,12 @@ export default function PriceUpdatesFiles() {
       .range((p - 1) * PAGE_SIZE, p * PAGE_SIZE - 1)
     if (vendorFilter) q = q.eq('vendor_id', vendorFilter)
     if (yearFilter) q = q.eq('year', Number(yearFilter))
-    if (search.trim()) q = q.ilike('file_name', `%${search.trim()}%`)
+    if (search.trim()) {
+      // Match the name or anywhere in the storage path, so archive subfolder
+      // context (brand/customer/date folders) is searchable too.
+      const term = search.trim().replace(/[%,()]/g, ' ')
+      q = q.or(`file_name.ilike.%${term}%,storage_path.ilike.%${term}%`)
+    }
     const { data, count, error: e } = await q
     if (e) setError(e.message)
     setFiles(data || [])
