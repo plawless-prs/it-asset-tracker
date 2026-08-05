@@ -7,10 +7,11 @@
 //   node import-price-library.mjs "C:\path\to\archive" --create-vendors
 //
 // --create-vendors: a folder that matches no existing vendor creates one
-// (instead of importing as Unassigned). A leading P21 supplier id on the
-// folder name is split off into the new vendor's p21_supplier_id — so a
-// folder named "10638 Gates Belts" creates vendor "Gates Belts" with
-// supplier id 10638. Works with --dry to preview what would be created.
+// (instead of importing as Unassigned). A P21 supplier id on the folder name
+// — trailing "Name - 10638" (keeps folders alphabetical) or leading
+// "10638 Name" — is split off into the new vendor's p21_supplier_id, so
+// "Gates Belts - 10638" creates vendor "Gates Belts" with supplier id 10638.
+// Works with --dry to preview what would be created.
 //
 // Expects the archive laid out as a folder per vendor, with any subfolder
 // structure below that (e.g. <archive>\<Vendor>\<year>\<date>\<files>).
@@ -110,15 +111,27 @@ const byNorm = new Map(vendors.map(v => [norm(v.name), v]))
 const bySupplierId = new Map(vendors.filter(v => v.p21_supplier_id)
   .map(v => [String(v.p21_supplier_id).trim(), v]))
 
-// Resolution order: (1) a leading P21 supplier id on the folder name (e.g.
-// "10638 Gates") — exact and unambiguous, the best escape hatch for folders
-// whose names won't match; (2) exact normalized name; (3) a folder that's an
-// unambiguous prefix of one vendor name (or vice versa) — archives tend to
-// use shorthand like "Parker" for "Parker Hannifin". Ambiguity = no match.
+// A folder name can carry the P21 supplier id, either trailing ("Gates
+// Belts - 10638", keeps folders alphabetical) or leading ("10638 Gates
+// Belts"). Split it off so both the id and the clean name can be used.
+function parseFolder(folderName) {
+  const t = folderName.trim()
+  let m = t.match(/^(\d+)\s+(.+)$/)
+  if (m) return { name: m[2].trim(), supplierId: m[1] }
+  m = t.match(/^(.+?)\s*-\s*(\d+)$/)
+  if (m) return { name: m[1].trim(), supplierId: m[2] }
+  return { name: t, supplierId: null }
+}
+
+// Resolution order: (1) the folder's supplier id — exact and unambiguous,
+// the best escape hatch for folders whose names won't match; (2) exact
+// normalized name; (3) a name that's an unambiguous prefix of one vendor
+// (or vice versa) — archives tend to use shorthand like "Parker" for
+// "Parker Hannifin". Ambiguity = no match.
 function matchVendor(folderName) {
-  const idPrefix = folderName.trim().match(/^(\d+)\b/)
-  if (idPrefix && bySupplierId.has(idPrefix[1])) return bySupplierId.get(idPrefix[1])
-  const n = norm(folderName)
+  const { name, supplierId } = parseFolder(folderName)
+  if (supplierId && bySupplierId.has(supplierId)) return bySupplierId.get(supplierId)
+  const n = norm(name)
   if (byNorm.has(n)) return byNorm.get(n)
   const candidates = vendors.filter(v => {
     const vn = norm(v.name)
@@ -130,13 +143,11 @@ function matchVendor(folderName) {
 const createdVendors = []
 
 // With --create-vendors, an unmatched folder becomes a new pu_vendors row:
-// "10638 Gates Belts" -> name "Gates Belts", p21_supplier_id "10638".
+// "Gates Belts - 10638" -> name "Gates Belts", p21_supplier_id "10638".
 // The new vendor is registered in the lookup maps so a same-named folder
 // later in the run matches it instead of creating a duplicate.
 async function createVendor(folderName) {
-  const idPrefix = folderName.trim().match(/^(\d+)\s+(.+)$/)
-  const name = (idPrefix ? idPrefix[2] : folderName).trim()
-  const supplierId = idPrefix ? idPrefix[1] : null
+  const { name, supplierId } = parseFolder(folderName)
 
   let vendor
   if (DRY) {
