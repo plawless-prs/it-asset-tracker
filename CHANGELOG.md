@@ -2,6 +2,10 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-08-05
+
+- **Price Update Processor — Files page folder-style filters (migration `17`):** Year is now a dropdown of the years that actually exist (scoped to the selected vendor), with a new Date dropdown beside it listing the archive's date folders within that year (the path segment after the year — brand/customer sublevels unaffected). Backed by the `pu_library_facets(vendor,year)` SQL function since date folders only exist as storage-path segments. Also: search matches the storage path (brands/customers/dates), and the import script grew `--create-vendors` (supplier id split from folder names like `Gates Belts - 10638`) used for the real 82-vendor archive import. **Run `17_pu_library_facets.sql`.**
+
 ## 2026-08-04
 
 - **Price Update Processor — Phase 5.5, price-file library (migration `16`):** new `/priceupdates/files` page (browse/filter/search, upload, vendor/year metadata editing, link files to batches — linked files appear on batch detail). Files live in the `price-files` bucket under `library/<vendor>/<year>/`, metadata in the new `pu_library_files` table. The historical office-PC archive bulk-imports via `scripts/import-price-library.mjs` (dependency-free; folder-per-vendor layout, year inferred, idempotent, `--dry` preview). **Run `16_pu_library_files.sql`.**

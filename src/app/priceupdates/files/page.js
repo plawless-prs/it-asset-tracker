@@ -23,6 +23,8 @@ export default function PriceUpdatesFiles() {
   const [vendors, setVendors] = useState([])
   const [vendorFilter, setVendorFilter] = useState('')
   const [yearFilter, setYearFilter] = useState('')
+  const [dateFilter, setDateFilter] = useState('')
+  const [facets, setFacets] = useState({ years: [], dates: [] })
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -45,6 +47,10 @@ export default function PriceUpdatesFiles() {
       .range((p - 1) * PAGE_SIZE, p * PAGE_SIZE - 1)
     if (vendorFilter) q = q.eq('vendor_id', vendorFilter)
     if (yearFilter) q = q.eq('year', Number(yearFilter))
+    if (yearFilter && dateFilter) {
+      // The "date" is the archive's folder after the year in the key.
+      q = q.ilike('storage_path', `%/${yearFilter}/${dateFilter.replace(/[%,()]/g, ' ')}/%`)
+    }
     if (search.trim()) {
       // Match the name or anywhere in the storage path, so archive subfolder
       // context (brand/customer/date folders) is searchable too.
@@ -58,7 +64,22 @@ export default function PriceUpdatesFiles() {
     setLoading(false)
   }
 
-  useEffect(() => { setPage(1); load(1) }, [vendorFilter, yearFilter])
+  // Facet dropdowns follow the vendor/year selection (folder-style: vendor ->
+  // year -> date). Year changes clear the date pick; vendor changes clear both
+  // if they're no longer valid (the facet reload handles the option lists).
+  useEffect(() => {
+    supabase.rpc('pu_library_facets', {
+      p_vendor_id: vendorFilter || null,
+      p_year: yearFilter ? Number(yearFilter) : null,
+    }).then(({ data }) => {
+      if (!data) return
+      setFacets(data)
+      if (yearFilter && !data.years.includes(Number(yearFilter))) setYearFilter('')
+      if (dateFilter && !data.dates.includes(dateFilter)) setDateFilter('')
+    })
+  }, [vendorFilter, yearFilter])
+
+  useEffect(() => { setPage(1); load(1) }, [vendorFilter, yearFilter, dateFilter])
   useEffect(() => {
     clearTimeout(searchTimer.current)
     searchTimer.current = setTimeout(() => { setPage(1); load(1) }, 300)
@@ -121,11 +142,19 @@ export default function PriceUpdatesFiles() {
           <option value="">All vendors</option>
           {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
         </select>
-        <input
-          type="number" placeholder="Year" value={yearFilter}
-          onChange={(e) => setYearFilter(e.target.value)}
-          style={{ ...inputStyle, width: '90px' }}
-        />
+        <select value={yearFilter} onChange={(e) => { setYearFilter(e.target.value); setDateFilter('') }} style={inputStyle}>
+          <option value="">All years</option>
+          {facets.years.map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
+        <select
+          value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}
+          disabled={!yearFilter || facets.dates.length === 0}
+          style={{ ...inputStyle, opacity: (!yearFilter || facets.dates.length === 0) ? 0.5 : 1 }}
+          title={!yearFilter ? 'Pick a year first' : facets.dates.length === 0 ? 'No date folders in this year' : ''}
+        >
+          <option value="">All dates</option>
+          {facets.dates.map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
         <input
           placeholder="Search file names…" value={search}
           onChange={(e) => setSearch(e.target.value)}
