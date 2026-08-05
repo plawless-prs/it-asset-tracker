@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '../../../lib/supabase'
-import { formatDate, formatBytes } from '../../../lib/priceupdates'
+import { formatDate, formatBytes, slugify as slug, sanitizeFileName as sanitize } from '../../../lib/priceupdates'
 
 // Phase 5.5: the price-file library. Historical vendor price files (bulk-
 // imported via scripts/import-price-library.mjs) plus new in-app uploads,
@@ -11,9 +11,6 @@ import { formatDate, formatBytes } from '../../../lib/priceupdates'
 // (vendor/year/batch link) lives on pu_library_files and is editable here —
 // the storage key never changes after upload.
 const PAGE_SIZE = 50
-
-const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unassigned'
-const sanitize = (s) => s.replace(/[^a-zA-Z0-9._-]/g, '_')
 
 export default function PriceUpdatesFiles() {
   const supabase = createClient()

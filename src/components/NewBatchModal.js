@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createClient } from '../lib/supabase'
+import { slugify, sanitizeFileName, dateFolderMMDDYY } from '../lib/priceupdates'
 
 // New price-update batch: pick or create a vendor, drag-drop one or more files.
 // Creates a `pu_batches` row (source 'upload', status 'received'), uploads the
@@ -74,8 +75,9 @@ export default function NewBatchModal({ onClose, onCreated }) {
       if (bErr) throw bErr
 
       // 3. Upload files + record pu_batch_files rows.
+      const uploaded = []
       for (const file of files) {
-        const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+        const safe = sanitizeFileName(file.name)
         const path = `${batch.id}/${Date.now()}-${safe}`
         const { error: upErr } = await supabase.storage.from('price-files').upload(path, file)
         if (upErr) throw upErr
@@ -87,6 +89,36 @@ export default function NewBatchModal({ onClose, onCreated }) {
           file_size: file.size,
         })
         if (fErr) throw fErr
+        uploaded.push({ path, safe, name: file.name, type: file.type, size: file.size })
+      }
+
+      // 3b. Archive copies into the file library under the vendor's date
+      // folder (library/<vendor>/<year>/<MM-DD-YY>/, from the effective date,
+      // else today) so the Files page keeps growing like the historical
+      // archive. Best-effort — a failure here must not block the batch.
+      const vendorRec = vendors.find(v => v.id === resolvedVendorId) ||
+        (creatingVendor && resolvedVendorId ? { id: resolvedVendorId, name: newVendorName.trim() } : null)
+      if (vendorRec) {
+        try {
+          const eff = effectiveDate || new Date().toISOString().slice(0, 10)
+          const year = Number(eff.slice(0, 4))
+          const folder = `library/${slugify(vendorRec.name)}/${year}/${dateFolderMMDDYY(eff)}`
+          const { data: { user } } = await supabase.auth.getUser()
+          for (const u of uploaded) {
+            let dest = `${folder}/${u.safe}`
+            let { error: cErr } = await supabase.storage.from('price-files').copy(u.path, dest)
+            if (cErr) {  // same-named file already archived there — keep both
+              dest = `${folder}/${Date.now()}-${u.safe}`
+              const retry = await supabase.storage.from('price-files').copy(u.path, dest)
+              if (retry.error) continue
+            }
+            await supabase.from('pu_library_files').insert({
+              vendor_id: vendorRec.id, year, file_name: u.name, storage_path: dest,
+              mime_type: u.type || null, file_size: u.size, batch_id: batch.id,
+              source: 'batch', uploaded_by: user?.id || null,
+            })
+          }
+        } catch { /* library archiving is best-effort */ }
       }
 
       // 4. Queue a supplier-scoped mirror sync so matching sees fresh P21 data

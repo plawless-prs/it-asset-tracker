@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { createClient } from '../../../../lib/supabase'
 import { useRole } from '../../../../lib/useRole'
@@ -43,6 +43,7 @@ function tabFilter(q, tab) {
 export default function BatchDetail() {
   const supabase = createClient()
   const { id } = useParams()
+  const router = useRouter()
   const { user } = useRole()
 
   const [batch, setBatch] = useState(null)
@@ -428,6 +429,47 @@ export default function BatchDetail() {
     }
   }
 
+  // Delete a batch that shouldn't exist (wrong file uploaded, duplicate, …).
+  // Only offered pre-approval (`editable` statuses). Removes: uploaded batch
+  // files + any generated exports (rows cascade with the batch; storage
+  // objects removed by path), and the library copies auto-archived from this
+  // batch (source batch/batch_export). Manually-linked library files survive
+  // (their batch_id FK just nulls out).
+  const [deleting, setDeleting] = useState(false)
+  async function deleteBatch() {
+    const msg = `Delete batch #${batch.number}${batch.vendor ? ` (${batch.vendor.name})` : ''}?\n\n` +
+      `This permanently removes its ${counts.all.toLocaleString()} parsed lines, ` +
+      `${files.length} uploaded file(s), any exports, and the copies auto-archived ` +
+      `to the file library. Files you linked to it manually are kept (just unlinked).`
+    if (!window.confirm(msg)) return
+    setDeleting(true); setError('')
+    try {
+      const { data: libRows } = await supabase
+        .from('pu_library_files').select('id, storage_path')
+        .eq('batch_id', id).in('source', ['batch', 'batch_export'])
+      const paths = [
+        ...files.map(f => f.storage_path),
+        ...exports.map(e => e.storage_path),
+        ...(libRows || []).map(l => l.storage_path),
+      ].filter(Boolean)
+      if (paths.length) {
+        const { error: sErr } = await supabase.storage.from('price-files').remove(paths)
+        if (sErr) throw sErr
+      }
+      if (libRows?.length) {
+        const { error: lErr } = await supabase.from('pu_library_files')
+          .delete().in('id', libRows.map(l => l.id))
+        if (lErr) throw lErr
+      }
+      const { error: bErr } = await supabase.from('pu_batches').delete().eq('id', id)
+      if (bErr) throw bErr
+      router.push('/priceupdates/batches')
+    } catch (e) {
+      setError(`Delete failed: ${e.message}`)
+      setDeleting(false)
+    }
+  }
+
   async function rematch() {
     setError(''); setNotice('')
     setMatching(true)
@@ -769,6 +811,15 @@ export default function BatchDetail() {
               <div style={{ fontSize: '12px', fontWeight: '600', color: '#c0cad8', marginBottom: '8px' }}>Activity / notes</div>
               <div style={{ fontSize: '11.5px', color: '#8aa0b8', whiteSpace: 'pre-wrap', maxHeight: '160px', overflowY: 'auto' }}>{batch.notes}</div>
             </div>
+          )}
+
+          {/* Danger zone — only before approval; approved/exported/applied batches are history. */}
+          {editable && (
+            <button onClick={deleteBatch} disabled={deleting} style={{
+              padding: '9px 14px', borderRadius: '10px', fontSize: '12px', fontWeight: '600',
+              backgroundColor: 'transparent', color: deleting ? '#7a4a4a' : '#f87171',
+              border: '1px solid #4a1d1d', cursor: deleting ? 'not-allowed' : 'pointer',
+            }}>{deleting ? 'Deleting…' : 'Delete batch'}</button>
           )}
         </div>
       </div>

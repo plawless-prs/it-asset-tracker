@@ -4,6 +4,8 @@ Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYY
 
 ## 2026-08-05
 
+- **Price Update Processor — batches auto-archive to the file library + batch deletion:** creating a batch now copies its uploaded files into the library at `library/<vendor>/<year>/<MM-DD-YY>/` (effective date, else received date) and generating an export archives the `.txt` alongside (replaced on regenerate) — so the Files page's date dropdown grows with each new update, no manual filing. Pre-approval batches gained a **Delete batch** action (removes lines/files/exports + the auto-archived copies; manually-linked library files just unlink). No migration.
+
 - **Price Update Processor — Files page folder-style filters (migration `17`):** Year is now a dropdown of the years that actually exist (scoped to the selected vendor), with a new Date dropdown beside it listing the archive's date folders within that year (the path segment after the year — brand/customer sublevels unaffected). Backed by the `pu_library_facets(vendor,year)` SQL function since date folders only exist as storage-path segments. Also: search matches the storage path (brands/customers/dates), and the import script grew `--create-vendors` (supplier id split from folder names like `Gates Belts - 10638`) used for the real 82-vendor archive import. **Run `17_pu_library_facets.sql`.**
 
 ## 2026-08-04

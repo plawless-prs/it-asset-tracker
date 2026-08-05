@@ -84,6 +84,18 @@ export function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+// Library storage-key helpers (Phase 5.5): keys look like
+// library/<vendor-slug>/<year>/<MM-DD-YY>/<file>, matching the archive's
+// folder conventions.
+export const slugify = (s) =>
+  String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unassigned'
+export const sanitizeFileName = (s) => String(s).replace(/[^a-zA-Z0-9._-]/g, '_')
+// "2026-09-05" -> "09-05-26" (the archive's date-folder convention)
+export function dateFolderMMDDYY(isoDate) {
+  const m = String(isoDate || '').match(/^(\d{4})-(\d{2})-(\d{2})/)
+  return m ? `${m[2]}-${m[3]}-${m[1].slice(2)}` : null
+}
+
 // "148 KB" / "2.4 MB"
 export function formatBytes(n) {
   if (n == null) return '—'
