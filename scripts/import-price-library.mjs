@@ -34,7 +34,9 @@ import { fileURLToPath } from 'url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 try {
-  for (const line of readFileSync(join(here, '.env'), 'utf8').split(/\r?\n/)) {
+  // Strip a leading UTF-8 BOM — Notepad/PowerShell often save .env with one,
+  // which would otherwise corrupt the first line's key name.
+  for (const line of readFileSync(join(here, '.env'), 'utf8').replace(/^﻿/, '').split(/\r?\n/)) {
     const t = line.trim()
     if (!t || t.startsWith('#') || !t.includes('=')) continue
     const k = t.slice(0, t.indexOf('=')).trim()
