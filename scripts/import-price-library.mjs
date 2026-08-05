@@ -4,6 +4,13 @@
 //
 //   node import-price-library.mjs "C:\path\to\archive" --dry
 //   node import-price-library.mjs "C:\path\to\archive"
+//   node import-price-library.mjs "C:\path\to\archive" --create-vendors
+//
+// --create-vendors: a folder that matches no existing vendor creates one
+// (instead of importing as Unassigned). A leading P21 supplier id on the
+// folder name is split off into the new vendor's p21_supplier_id — so a
+// folder named "10638 Gates Belts" creates vendor "Gates Belts" with
+// supplier id 10638. Works with --dry to preview what would be created.
 //
 // Expects the archive laid out as a folder per vendor, with any subfolder
 // structure below that (e.g. <archive>\<Vendor>\<year>\<date>\<files>).
@@ -48,9 +55,10 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABA
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const args = process.argv.slice(2)
 const DRY = args.includes('--dry')
+const CREATE_VENDORS = args.includes('--create-vendors')
 const root = args.find(a => !a.startsWith('--'))
 
-if (!root) { console.error('Usage: node import-price-library.mjs <archive-folder> [--dry]'); process.exit(1) }
+if (!root) { console.error('Usage: node import-price-library.mjs <archive-folder> [--dry] [--create-vendors]'); process.exit(1) }
 if (!SUPABASE_URL || !KEY) { console.error('Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY (put them in .env next to this script)'); process.exit(1) }
 
 const MIME = {
@@ -119,6 +127,33 @@ function matchVendor(folderName) {
   return candidates.length === 1 ? candidates[0] : null
 }
 
+const createdVendors = []
+
+// With --create-vendors, an unmatched folder becomes a new pu_vendors row:
+// "10638 Gates Belts" -> name "Gates Belts", p21_supplier_id "10638".
+// The new vendor is registered in the lookup maps so a same-named folder
+// later in the run matches it instead of creating a duplicate.
+async function createVendor(folderName) {
+  const idPrefix = folderName.trim().match(/^(\d+)\s+(.+)$/)
+  const name = (idPrefix ? idPrefix[2] : folderName).trim()
+  const supplierId = idPrefix ? idPrefix[1] : null
+
+  let vendor
+  if (DRY) {
+    vendor = { id: null, name, p21_supplier_id: supplierId }
+  } else {
+    const rows = await sb('POST', '/rest/v1/pu_vendors',
+      JSON.stringify({ name, p21_supplier_id: supplierId }),
+      { 'Content-Type': 'application/json', Prefer: 'return=representation' })
+    vendor = rows[0]
+  }
+  byNorm.set(norm(name), vendor)
+  if (supplierId) bySupplierId.set(supplierId, vendor)
+  vendors.push(vendor)
+  createdVendors.push(`${name}${supplierId ? ` (supplier ${supplierId})` : ''}`)
+  return vendor
+}
+
 const existing = new Map() // storage_path -> file_size
 let from = 0
 while (true) {
@@ -143,7 +178,8 @@ const unmatchedFolders = new Set()
 
 for (const topEntry of readdirSync(root, { withFileTypes: true })) {
   if (!topEntry.isDirectory() || SKIP_FILES.test(topEntry.name)) continue
-  const vendor = matchVendor(topEntry.name)
+  let vendor = matchVendor(topEntry.name)
+  if (!vendor && CREATE_VENDORS) vendor = await createVendor(topEntry.name)
   if (!vendor) unmatchedFolders.add(topEntry.name)
   const vslug = vendor ? slug(vendor.name) : slug(topEntry.name)
 
@@ -194,6 +230,10 @@ for (const topEntry of readdirSync(root, { withFileTypes: true })) {
 }
 
 console.log(`\n${DRY ? 'Would upload' : 'Uploaded'} ${uploaded} · skipped ${skipped} (already imported or empty) · failed ${failed}`)
+if (createdVendors.length) {
+  console.log(`${DRY ? 'Would create' : 'Created'} ${createdVendors.length} vendor(s):`)
+  for (const v of createdVendors) console.log(`  + ${v}`)
+}
 if (unmatchedFolders.size) {
   console.log(`Folders with no matching vendor (imported unassigned — set the vendor on the Files page, or add the vendor first and re-run):`)
   for (const d of unmatchedFolders) console.log(`  - ${d}`)
