@@ -100,19 +100,20 @@ that way.
 
 ## To resume
 
-- **Phase 5.5 (price-file library) — BUILT 2026-08-04 (migration `16`), one
-  step outstanding: running the bulk import.** `/priceupdates/files` page
-  (browse/filter/search, in-app upload, vendor/year metadata editing, batch
-  linking — linked files show on batch detail); objects in `price-files` under
-  `library/<vendor-slug>/<year>/`, metadata in `pu_library_files`.
-  **Remaining: run `scripts/import-price-library.mjs` on the PC that holds the
-  historical archive** (folder-per-vendor layout confirmed with Porter;
-  dependency-free — copy the script + a `.env` with `SUPABASE_URL` +
-  `SUPABASE_SERVICE_ROLE_KEY`, then `node import-price-library.mjs
-  "<archive path>" --dry` to preview, and again without `--dry` to import;
-  idempotent, so partial runs can just be re-run). Vendor folders that don't
-  match a `pu_vendors.name` import as Unassigned — fix on the Files page, or
-  add the vendor and re-run.
+- **Phase 5.5 (price-file library) — DONE, archive imported and verified
+  (2026-08-05, migrations `16`+`17`; auto-archive/deletion tested by Porter
+  2026-08-10).** `/priceupdates/files`: folder-style filters vendor → year →
+  date (dropdowns via `pu_library_facets` SQL fn; "date" = path segment after
+  the year), search over name + path, in-app upload, vendor/year editing,
+  batch linking. **The historical OneDrive archive is imported: 2,397 files
+  across 82 vendors (2021–2026)** via `scripts/import-price-library.mjs`
+  (`--create-vendors` grew `pu_vendors` from 3 to the full list, splitting
+  supplier ids from `Name - 10638`-style folder names; script is idempotent —
+  re-run anytime for top-ups). **Batches now feed the library automatically**
+  (inbound files archived on creation under the effective date's
+  `MM-DD-YY` folder, exports archived beside them on generation), and
+  pre-approval batches can be **deleted** from the detail page (cleans lines,
+  files, exports, and auto-archived library copies).
 - After 5.5, remaining build-spec phases: **6** email intake from
   `priceupdate@` · **7** polish. Porter explicitly wants 5.5 before Phase 6.
 - Also outstanding: round-trip a generated export through P21's real import
