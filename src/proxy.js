@@ -48,6 +48,6 @@ export const config = {
   // clientState / bearer) and are called by external systems with no browser
   // session: Graph notifications, the subscribe/renew endpoint, and inbound email.
   matcher: [
-    '/((?!api/helpdesk/graph-notify|api/helpdesk/graph-subscribe|api/helpdesk/inbound|api/p21/sync-items|_next/static|_next/image|favicon.ico).*)',
+    '/((?!api/helpdesk/graph-notify|api/helpdesk/graph-subscribe|api/helpdesk/inbound|api/p21/sync-items|api/priceupdates/reminders|_next/static|_next/image|favicon.ico).*)',
   ],
 }

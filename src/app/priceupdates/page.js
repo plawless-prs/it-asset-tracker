@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '../../lib/supabase'
 import NewBatchModal from '../../components/NewBatchModal'
 import {
-  BATCH_STATUS_META, SOURCE_META, attentionPill, relativeTime,
+  BATCH_STATUS_META, SOURCE_META, attentionPill, relativeTime, daysUntil,
 } from '../../lib/priceupdates'
 
 function MetricCard({ label, value, accent }) {
@@ -40,7 +40,7 @@ export default function PriceUpdatesDashboard() {
     async function load() {
       const { data } = await supabase
         .from('pu_batches')
-        .select('id, number, source, status, received_at, applied_at, line_count, matched_count, flagged_count, vendor:vendor_id(id, name)')
+        .select('id, number, source, status, received_at, applied_at, effective_date, line_count, matched_count, flagged_count, vendor:vendor_id(id, name)')
         .order('received_at', { ascending: false })
       setBatches(data || [])
       setLoading(false)
@@ -52,6 +52,11 @@ export default function PriceUpdatesDashboard() {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
 
   const metrics = {
+    // Scheduled batches at/past their effective date and not yet applied.
+    dueNow: batches.filter(b =>
+      b.effective_date && !['applied', 'archived'].includes(b.status) &&
+      daysUntil(b.effective_date) <= 0
+    ).length,
     awaitingReview: batches.filter(b => b.status === 'needs_review').length,
     unmatchedLines: batches
       .filter(b => ['needs_review', 'approved'].includes(b.status))
@@ -83,6 +88,7 @@ export default function PriceUpdatesDashboard() {
         <>
           {/* Metric cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+            <MetricCard label="Due to load in P21" value={metrics.dueNow} accent={metrics.dueNow ? '#f87171' : undefined} />
             <MetricCard label="Awaiting review" value={metrics.awaitingReview} accent={metrics.awaitingReview ? '#fbbf24' : undefined} />
             <MetricCard label="Unmatched lines" value={metrics.unmatchedLines} accent={metrics.unmatchedLines ? '#f87171' : undefined} />
             <MetricCard label="Approved, not exported" value={metrics.approvedNotExported} />

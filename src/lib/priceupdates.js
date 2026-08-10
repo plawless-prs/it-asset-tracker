@@ -55,12 +55,57 @@ export const FLAG_META = {
 // --- Derived "attention" pill for the queue ---------------------------------
 // The status-vs-derived-state idea from Help Desk's SLA pills: computed from the
 // batch's line counts rather than stored. Returns a pill meta or null.
+// --- Scheduling (calendar) helpers ------------------------------------------
+
+// Business dates run on Central time (the company timezone) so a batch flips
+// to "due today" at midnight in the office, not at midnight UTC.
+export function todayCentral() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })
+}
+
+// Whole days from `fromISO` to `toISO` (both 'YYYY-MM-DD'); negative = past.
+export function daysUntil(toISO, fromISO = todayCentral()) {
+  const [fy, fm, fd] = String(fromISO).split('-').map(Number)
+  const [ty, tm, td] = String(toISO).slice(0, 10).split('-').map(Number)
+  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000)
+}
+
+// Derived readiness of a scheduled batch (never stored — same idea as SLA
+// state): ready = fully prepped for its effective date; prep = work remains.
+export function batchReadiness(batch) {
+  if (!batch) return null
+  if (['applied', 'archived'].includes(batch.status)) return 'done'
+  if (['approved', 'exported'].includes(batch.status)) return 'ready'
+  return 'prep'
+}
+
 export function attentionPill(batch) {
   if (!batch) return null
   const unmatched = (batch.line_count || 0) - (batch.matched_count || 0)
   if (batch.status === 'failed') {
     return { label: 'Failed', pillBg: '#330d0d', pillText: '#f87171' }
   }
+
+  // Effective-date awareness: an unapplied batch at/past its date outranks
+  // everything below; a near-future one that isn't prepped gets a warning.
+  if (batch.effective_date && !['applied', 'archived'].includes(batch.status)) {
+    const d = daysUntil(batch.effective_date)
+    const ready = batchReadiness(batch) === 'ready'
+    if (d < 0) {
+      return ready
+        ? { label: `Overdue ${-d}d — load into P21`, pillBg: '#330d0d', pillText: '#f87171' }
+        : { label: `Overdue ${-d}d — not ready`, pillBg: '#330d0d', pillText: '#f87171' }
+    }
+    if (d === 0) {
+      return ready
+        ? { label: 'Load into P21 today', pillBg: '#1a1a2e', pillText: '#a78bfa' }
+        : { label: 'Due today — not ready', pillBg: '#330d0d', pillText: '#f87171' }
+    }
+    if (d <= 7 && !ready) {
+      return { label: `Due in ${d}d — needs prep`, pillBg: '#332300', pillText: '#fbbf24' }
+    }
+  }
+
   if (batch.status === 'exported') {
     return { label: 'Awaiting P21 load', pillBg: '#1a1a2e', pillText: '#a78bfa' }
   }

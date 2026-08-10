@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { createClient } from '../../../lib/supabase'
 import NewBatchModal from '../../../components/NewBatchModal'
+import BatchCalendar from '../../../components/BatchCalendar'
 import {
   BATCH_STATUS_META, BATCH_STATUS_ORDER, SOURCE_META,
   attentionPill, relativeTime,
@@ -32,20 +33,29 @@ export default function BatchQueue() {
   const [batches, setBatches] = useState([])
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
+  const [newDate, setNewDate] = useState(null)   // effective-date prefill from the calendar
   const [fStatus, setFStatus] = useState('open')
   const [fVendor, setFVendor] = useState('all')
+  const [view, setView] = useState('list')       // 'list' | 'calendar' (persisted)
 
   useEffect(() => {
-    async function load() {
-      const { data } = await supabase
-        .from('pu_batches')
-        .select('id, number, source, status, received_at, line_count, matched_count, flagged_count, vendor:vendor_id(id, name)')
-        .order('received_at', { ascending: false })
-      setBatches(data || [])
-      setLoading(false)
-    }
-    load()
+    const saved = typeof window !== 'undefined' && window.localStorage.getItem('pu_batches_view')
+    if (saved === 'calendar') setView('calendar')
   }, [])
+  function switchView(v) {
+    setView(v)
+    try { window.localStorage.setItem('pu_batches_view', v) } catch { /* private mode */ }
+  }
+
+  async function load() {
+    const { data } = await supabase
+      .from('pu_batches')
+      .select('id, number, source, status, received_at, effective_date, line_count, matched_count, flagged_count, vendor:vendor_id(id, name)')
+      .order('received_at', { ascending: false })
+    setBatches(data || [])
+    setLoading(false)
+  }
+  useEffect(() => { load() }, [])
 
   // Vendor options come from the batches actually present.
   const vendorOptions = Array.from(
@@ -68,12 +78,38 @@ export default function BatchQueue() {
           <h1 style={{ fontSize: '22px', fontWeight: '700', color: '#e0e7f0', margin: '0 0 2px' }}>Batches</h1>
           <p style={{ fontSize: '13px', color: '#5a6e84', margin: 0 }}>{filtered.length} shown</p>
         </div>
-        <button onClick={() => setShowNew(true)} style={{
-          backgroundColor: '#2563eb', color: '#fff', padding: '10px 18px', borderRadius: '10px',
-          fontWeight: '600', fontSize: '13px', border: 'none', cursor: 'pointer',
-        }}>+ New batch</button>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          {/* View toggle */}
+          <div style={{ display: 'flex', backgroundColor: '#131a24', border: '1px solid #1e2d40', borderRadius: '9px', padding: '3px' }}>
+            {[['list', 'List'], ['calendar', 'Calendar']].map(([v, label]) => (
+              <button key={v} onClick={() => switchView(v)} style={{
+                padding: '6px 14px', borderRadius: '7px', fontSize: '12.5px', fontWeight: '600',
+                backgroundColor: view === v ? '#1e3a5f' : 'transparent',
+                color: view === v ? '#60a5fa' : '#5a6e84',
+                border: 'none', cursor: 'pointer',
+              }}>{label}</button>
+            ))}
+          </div>
+          <button onClick={() => { setNewDate(null); setShowNew(true) }} style={{
+            backgroundColor: '#2563eb', color: '#fff', padding: '10px 18px', borderRadius: '10px',
+            fontWeight: '600', fontSize: '13px', border: 'none', cursor: 'pointer',
+          }}>+ New batch</button>
+        </div>
       </div>
 
+      {view === 'calendar' ? (
+        loading ? (
+          <div style={{ padding: '48px', textAlign: 'center', color: '#5a6e84' }}>Loading…</div>
+        ) : (
+          <BatchCalendar
+            batches={batches}
+            onOpen={(b) => router.push(`/priceupdates/batches/${b.id}`)}
+            onCreate={(iso) => { setNewDate(iso); setShowNew(true) }}
+            onChanged={load}
+          />
+        )
+      ) : (
+      <>
       {/* Filter bar */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
         <select style={selectStyle} value={fStatus} onChange={e => setFStatus(e.target.value)}>
@@ -146,9 +182,12 @@ export default function BatchQueue() {
           )
         })}
       </div>
+      </>
+      )}
 
       {showNew && (
         <NewBatchModal
+          defaultEffectiveDate={newDate}
           onClose={() => setShowNew(false)}
           onCreated={(batch) => { setShowNew(false); router.push(`/priceupdates/batches/${batch.id}`) }}
         />

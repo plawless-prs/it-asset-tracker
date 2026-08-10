@@ -7,15 +7,16 @@ import { slugify, sanitizeFileName, dateFolderMMDDYY } from '../lib/priceupdates
 // New price-update batch: pick or create a vendor, drag-drop one or more files.
 // Creates a `pu_batches` row (source 'upload', status 'received'), uploads the
 // files to the private `price-files` bucket, and records `pu_batch_files` rows.
-// Calls onCreated(batch) on success.
-export default function NewBatchModal({ onClose, onCreated }) {
+// Calls onCreated(batch) on success. `defaultEffectiveDate` ('YYYY-MM-DD')
+// prefills the effective date — the calendar passes the clicked day.
+export default function NewBatchModal({ onClose, onCreated, defaultEffectiveDate }) {
   const supabase = createClient()
   const fileInputRef = useRef(null)
   const [vendors, setVendors] = useState([])
   const [vendorId, setVendorId] = useState('')
   const [newVendorName, setNewVendorName] = useState('')
   const [creatingVendor, setCreatingVendor] = useState(false)
-  const [effectiveDate, setEffectiveDate] = useState('')
+  const [effectiveDate, setEffectiveDate] = useState(defaultEffectiveDate || '')
   const [files, setFiles] = useState([])
   const [dragOver, setDragOver] = useState(false)
   const [saving, setSaving] = useState(false)

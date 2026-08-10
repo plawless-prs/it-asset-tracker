@@ -2,6 +2,10 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-08-10
+
+- **Price Update Processor — batch scheduling calendar + daily reminders (migration `18`):** the batches page gains an Outlook-style month calendar (List | Calendar toggle) over effective dates — status-colored pills with readiness dots, peek cards, drag-to-reschedule, click-a-day batch creation, and an overdue/upcoming agenda. `attentionPill()` is now effective-date-aware ("Load into P21 today"/overdue/due-soon-not-ready) and the dashboard shows a "Due to load in P21" metric. A new daily cron (12:00 UTC → `/api/priceupdates/reminders`, `proxy.js`-excluded) emails a digest of batches due within a week or overdue — repeating until applied or deleted; recipients editable in Settings (`pu_settings.reminder_emails`). **Run `18_pu_reminders.sql`.**
+
 ## 2026-08-05
 
 - **Price Update Processor — batches auto-archive to the file library + batch deletion:** creating a batch now copies its uploaded files into the library at `library/<vendor>/<year>/<MM-DD-YY>/` (effective date, else received date) and generating an export archives the `.txt` alongside (replaced on regenerate) — so the Files page's date dropdown grows with each new update, no manual filing. Pre-approval batches gained a **Delete batch** action (removes lines/files/exports + the auto-archived copies; manually-linked library files just unlink). No migration.

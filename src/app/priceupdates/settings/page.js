@@ -186,6 +186,8 @@ export default function PriceUpdatesSettings() {
             )}
           </div>
 
+          <ReminderCard supabase={supabase} settings={settings} card={card} labelStyle={labelStyle} onSaved={load} />
+
           <div style={card}>
             <div style={{ fontSize: '14px', fontWeight: '600', color: '#c0cad8', marginBottom: '12px' }}>
               Guardrails <span style={{ fontSize: '11.5px', color: '#5a6e84', fontWeight: '400' }}>(editable in a later phase)</span>
@@ -198,6 +200,55 @@ export default function PriceUpdatesSettings() {
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+// Batch-reminder recipients: who gets the daily digest of batches due within
+// a week / overdue (sent by the /api/priceupdates/reminders cron at 7am CT).
+// Empty list = reminders off.
+function ReminderCard({ supabase, settings, card, labelStyle, onSaved }) {
+  const [value, setValue] = useState((settings?.reminder_emails || []).join(', '))
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  async function save() {
+    setSaving(true); setMsg('')
+    const emails = value.split(',').map(s => s.trim()).filter(s => s.includes('@'))
+    const { error } = await supabase.from('pu_settings')
+      .update({ reminder_emails: emails })
+      .eq('id', 1)
+    setSaving(false)
+    if (error) { setMsg(`Error: ${error.message}`); return }
+    setValue(emails.join(', '))
+    setMsg(emails.length ? `Saved — daily digest goes to ${emails.length} recipient(s).` : 'Saved — reminders are off (no recipients).')
+    onSaved?.()
+  }
+
+  return (
+    <div style={card}>
+      <div style={{ fontSize: '14px', fontWeight: '600', color: '#c0cad8', marginBottom: '10px' }}>Batch reminders</div>
+      <div style={labelStyle}>Recipients (comma-separated)</div>
+      <div style={{ display: 'flex', gap: '8px' }}>
+        <input
+          value={value} onChange={(e) => setValue(e.target.value)}
+          placeholder="you@powerandrubber.com"
+          style={{
+            flex: 1, padding: '9px 12px', backgroundColor: '#131a24', border: '1px solid #1e2d40',
+            borderRadius: '8px', color: '#c0cad8', fontSize: '13px', outline: 'none',
+          }}
+        />
+        <button onClick={save} disabled={saving} style={{
+          padding: '9px 16px', borderRadius: '10px', fontSize: '13px', fontWeight: '600',
+          backgroundColor: saving ? '#1e40af' : '#2563eb', color: '#fff', border: 'none',
+          cursor: saving ? 'not-allowed' : 'pointer',
+        }}>{saving ? 'Saving…' : 'Save'}</button>
+      </div>
+      <div style={{ fontSize: '11.5px', color: '#5a6e84', marginTop: '10px' }}>
+        A daily 7am email digest of batches due within a week or overdue — repeating until each
+        batch is applied in P21 or deleted. Leave empty to turn reminders off.
+      </div>
+      {msg && <div style={{ marginTop: '10px', fontSize: '12.5px', color: msg.startsWith('Error') ? '#f87171' : '#4ade80' }}>{msg}</div>}
     </div>
   )
 }
