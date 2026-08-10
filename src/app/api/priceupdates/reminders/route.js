@@ -34,7 +34,10 @@ function describe(b, today) {
   const d = daysUntil(b.effective_date, today)
   const when = d < 0 ? `${-d} day(s) overdue` : d === 0 ? 'due TODAY' : `in ${d} day(s)`
   const status = BATCH_STATUS_META[b.status]?.label || b.status
-  const ready = batchReadiness(b) === 'ready' ? 'ready to load' : 'NOT ready — needs prep'
+  const awaitingFile = b.status === 'received' && (b.files?.[0]?.count ?? 0) === 0
+  const ready = batchReadiness(b) === 'ready' ? 'ready to load'
+    : awaitingFile ? 'NOT ready — still awaiting the vendor file'
+    : 'NOT ready — needs prep'
   return `  • ${b.vendor?.name || 'Unidentified vendor'} — batch #${b.number}, effective ${b.effective_date} (${when}) — ${status}, ${ready}`
 }
 
@@ -47,7 +50,7 @@ async function handler(req) {
 
   const { data: batches, error } = await admin
     .from('pu_batches')
-    .select('id, number, status, effective_date, vendor:vendor_id(name)')
+    .select('id, number, status, effective_date, vendor:vendor_id(name), files:pu_batch_files(count)')
     .not('effective_date', 'is', null)
     .lte('effective_date', horizon)
     .not('status', 'in', '(applied,archived)')

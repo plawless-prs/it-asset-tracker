@@ -4,7 +4,55 @@
 // profile). Kept separate from the pure lib/priceupdates.js because these touch
 // the network + the Supabase client. Reused by the mapping UI and the batch
 // page's one-click auto-parse.
-import { buildLinesFromRows } from './priceupdates'
+import { buildLinesFromRows, slugify, sanitizeFileName, dateFolderMMDDYY } from './priceupdates'
+
+// Upload files to a batch: object under `<batchId>/`, a pu_batch_files row
+// each, then (best-effort) archive copies into the file library under the
+// vendor's effective-date folder — library/<vendor>/<year>/<MM-DD-YY>/.
+// Shared by the New Batch modal and the batch-detail "Add files" action so
+// late-arriving files get the identical treatment. `vendor` is { id, name }
+// or null (no archiving without one). Throws on upload/record failure.
+export async function uploadBatchFiles(supabase, { batchId, vendor, effectiveDate, files, userId }) {
+  const uploaded = []
+  for (const file of files) {
+    const safe = sanitizeFileName(file.name)
+    const path = `${batchId}/${Date.now()}-${safe}`
+    const { error: upErr } = await supabase.storage.from('price-files').upload(path, file)
+    if (upErr) throw upErr
+    const { error: fErr } = await supabase.from('pu_batch_files').insert({
+      batch_id: batchId,
+      storage_path: path,
+      file_name: file.name,
+      mime_type: file.type || null,
+      file_size: file.size,
+    })
+    if (fErr) throw fErr
+    uploaded.push({ path, safe, name: file.name, type: file.type, size: file.size })
+  }
+
+  if (vendor) {
+    try {
+      const eff = effectiveDate || new Date().toISOString().slice(0, 10)
+      const year = Number(String(eff).slice(0, 4))
+      const folder = `library/${slugify(vendor.name)}/${year}/${dateFolderMMDDYY(eff)}`
+      for (const u of uploaded) {
+        let dest = `${folder}/${u.safe}`
+        const { error: cErr } = await supabase.storage.from('price-files').copy(u.path, dest)
+        if (cErr) {  // same-named file already archived there — keep both
+          dest = `${folder}/${Date.now()}-${u.safe}`
+          const retry = await supabase.storage.from('price-files').copy(u.path, dest)
+          if (retry.error) continue
+        }
+        await supabase.from('pu_library_files').insert({
+          vendor_id: vendor.id, year, file_name: u.name, storage_path: dest,
+          mime_type: u.type || null, file_size: u.size, batch_id: batchId,
+          source: 'batch', uploaded_by: userId || null,
+        })
+      }
+    } catch { /* library archiving is best-effort */ }
+  }
+  return uploaded.length
+}
 
 // POST the file to the server parse route -> { file, sheets:[{name,rows}], truncated }
 export async function fetchParsedSheets(supabase, fileId) {

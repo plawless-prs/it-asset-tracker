@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createClient } from '../lib/supabase'
-import { slugify, sanitizeFileName, dateFolderMMDDYY } from '../lib/priceupdates'
+import { uploadBatchFiles } from '../lib/priceupdatesParse'
 
 // New price-update batch: pick or create a vendor, drag-drop one or more files.
 // Creates a `pu_batches` row (source 'upload', status 'received'), uploads the
@@ -50,7 +50,6 @@ export default function NewBatchModal({ onClose, onCreated, defaultEffectiveDate
 
   async function handleCreate() {
     setError('')
-    if (files.length === 0) { setError('Add at least one file.'); return }
     if (creatingVendor && !newVendorName.trim()) { setError('Enter a vendor name.'); return }
     setSaving(true)
 
@@ -75,51 +74,19 @@ export default function NewBatchModal({ onClose, onCreated, defaultEffectiveDate
         .single()
       if (bErr) throw bErr
 
-      // 3. Upload files + record pu_batch_files rows.
-      const uploaded = []
-      for (const file of files) {
-        const safe = sanitizeFileName(file.name)
-        const path = `${batch.id}/${Date.now()}-${safe}`
-        const { error: upErr } = await supabase.storage.from('price-files').upload(path, file)
-        if (upErr) throw upErr
-        const { error: fErr } = await supabase.from('pu_batch_files').insert({
-          batch_id: batch.id,
-          storage_path: path,
-          file_name: file.name,
-          mime_type: file.type || null,
-          file_size: file.size,
-        })
-        if (fErr) throw fErr
-        uploaded.push({ path, safe, name: file.name, type: file.type, size: file.size })
-      }
-
-      // 3b. Archive copies into the file library under the vendor's date
-      // folder (library/<vendor>/<year>/<MM-DD-YY>/, from the effective date,
-      // else today) so the Files page keeps growing like the historical
-      // archive. Best-effort — a failure here must not block the batch.
+      // 3. Upload + record files, and archive library copies under the
+      // vendor's effective-date folder (shared helper — the batch-detail
+      // "Add files" action uses the same path). Files are optional: a
+      // notification can arrive before the vendor releases the file, so a
+      // batch may start as a scheduled placeholder.
       const vendorRec = vendors.find(v => v.id === resolvedVendorId) ||
         (creatingVendor && resolvedVendorId ? { id: resolvedVendorId, name: newVendorName.trim() } : null)
-      if (vendorRec) {
-        try {
-          const eff = effectiveDate || new Date().toISOString().slice(0, 10)
-          const year = Number(eff.slice(0, 4))
-          const folder = `library/${slugify(vendorRec.name)}/${year}/${dateFolderMMDDYY(eff)}`
-          const { data: { user } } = await supabase.auth.getUser()
-          for (const u of uploaded) {
-            let dest = `${folder}/${u.safe}`
-            let { error: cErr } = await supabase.storage.from('price-files').copy(u.path, dest)
-            if (cErr) {  // same-named file already archived there — keep both
-              dest = `${folder}/${Date.now()}-${u.safe}`
-              const retry = await supabase.storage.from('price-files').copy(u.path, dest)
-              if (retry.error) continue
-            }
-            await supabase.from('pu_library_files').insert({
-              vendor_id: vendorRec.id, year, file_name: u.name, storage_path: dest,
-              mime_type: u.type || null, file_size: u.size, batch_id: batch.id,
-              source: 'batch', uploaded_by: user?.id || null,
-            })
-          }
-        } catch { /* library archiving is best-effort */ }
+      if (files.length > 0) {
+        const { data: { user } } = await supabase.auth.getUser()
+        await uploadBatchFiles(supabase, {
+          batchId: batch.id, vendor: vendorRec, effectiveDate: effectiveDate || null,
+          files, userId: user?.id,
+        })
       }
 
       // 4. Queue a supplier-scoped mirror sync so matching sees fresh P21 data
@@ -231,7 +198,7 @@ export default function NewBatchModal({ onClose, onCreated, defaultEffectiveDate
 
         {/* Drop zone */}
         <div style={{ marginBottom: '18px' }}>
-          <label style={labelStyle}>Files</label>
+          <label style={labelStyle}>Files <span style={{ color: '#5a6e84', fontWeight: '400', textTransform: 'none', letterSpacing: 0 }}>(optional — add now, or on the batch page once the vendor releases the file)</span></label>
           <div
             onClick={() => fileInputRef.current?.click()}
             onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}

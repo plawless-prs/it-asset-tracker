@@ -86,26 +86,35 @@ export function attentionPill(batch) {
     return { label: 'Failed', pillBg: '#330d0d', pillText: '#f87171' }
   }
 
+  // A placeholder batch created from a price-update notification before the
+  // vendor released the file (file_count comes from a pu_batch_files(count)
+  // embed — undefined when the caller didn't fetch it).
+  const awaitingFile = batch.file_count === 0 && batch.status === 'received'
+
   // Effective-date awareness: an unapplied batch at/past its date outranks
   // everything below; a near-future one that isn't prepped gets a warning.
   if (batch.effective_date && !['applied', 'archived'].includes(batch.status)) {
     const d = daysUntil(batch.effective_date)
     const ready = batchReadiness(batch) === 'ready'
+    const why = awaitingFile ? 'awaiting file' : 'not ready'
     if (d < 0) {
       return ready
         ? { label: `Overdue ${-d}d — load into P21`, pillBg: '#330d0d', pillText: '#f87171' }
-        : { label: `Overdue ${-d}d — not ready`, pillBg: '#330d0d', pillText: '#f87171' }
+        : { label: `Overdue ${-d}d — ${why}`, pillBg: '#330d0d', pillText: '#f87171' }
     }
     if (d === 0) {
       return ready
         ? { label: 'Load into P21 today', pillBg: '#1a1a2e', pillText: '#a78bfa' }
-        : { label: 'Due today — not ready', pillBg: '#330d0d', pillText: '#f87171' }
+        : { label: `Due today — ${why}`, pillBg: '#330d0d', pillText: '#f87171' }
     }
     if (d <= 7 && !ready) {
-      return { label: `Due in ${d}d — needs prep`, pillBg: '#332300', pillText: '#fbbf24' }
+      return { label: `Due in ${d}d — ${awaitingFile ? 'awaiting file' : 'needs prep'}`, pillBg: '#332300', pillText: '#fbbf24' }
     }
   }
 
+  if (awaitingFile) {
+    return { label: 'Awaiting file', pillBg: '#13202e', pillText: '#7fb4f5' }
+  }
   if (batch.status === 'exported') {
     return { label: 'Awaiting P21 load', pillBg: '#1a1a2e', pillText: '#a78bfa' }
   }

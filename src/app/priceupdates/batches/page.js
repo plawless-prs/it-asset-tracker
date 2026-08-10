@@ -50,9 +50,10 @@ export default function BatchQueue() {
   async function load() {
     const { data } = await supabase
       .from('pu_batches')
-      .select('id, number, source, status, received_at, effective_date, line_count, matched_count, flagged_count, vendor:vendor_id(id, name)')
+      .select('id, number, source, status, received_at, effective_date, line_count, matched_count, flagged_count, vendor:vendor_id(id, name), files:pu_batch_files(count)')
       .order('received_at', { ascending: false })
-    setBatches(data || [])
+    // Flatten the count embed so attentionPill can spot fileless placeholders.
+    setBatches((data || []).map(b => ({ ...b, file_count: b.files?.[0]?.count ?? 0 })))
     setLoading(false)
   }
   useEffect(() => { load() }, [])

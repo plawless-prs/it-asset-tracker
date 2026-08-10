@@ -10,7 +10,7 @@ import {
   formatCurrency, formatDate, formatPct, relativeTime,
   costChangePct, computeFlag, normalizePart,
 } from '../../../../lib/priceupdates'
-import { fetchParsedSheets, applyParse, triggerMatch, generateExport } from '../../../../lib/priceupdatesParse'
+import { fetchParsedSheets, applyParse, triggerMatch, generateExport, uploadBatchFiles } from '../../../../lib/priceupdatesParse'
 
 const SPREADSHEET = /\.(xlsx|xls|csv)$/i
 const PAGE_SIZE = 100
@@ -429,6 +429,34 @@ export default function BatchDetail() {
     }
   }
 
+  // Late file upload — a batch can be created as a scheduled placeholder
+  // before the vendor releases the file ("Add files" on the Files card).
+  // Same treatment as creation-time uploads: pu_batch_files rows + library
+  // archive under the effective-date folder.
+  const addFilesRef = useRef(null)
+  const [addingFiles, setAddingFiles] = useState(false)
+  async function handleAddFiles(fileList) {
+    const picked = Array.from(fileList || [])
+    if (picked.length === 0) return
+    setAddingFiles(true); setError(''); setNotice('')
+    try {
+      const n = await uploadBatchFiles(supabase, {
+        batchId: id,
+        vendor: batch.vendor ? { id: batch.vendor.id, name: batch.vendor.name } : null,
+        effectiveDate: batch.effective_date || null,
+        files: picked,
+        userId: user?.id,
+      })
+      setNotice(`Added ${n} file${n === 1 ? '' : 's'}.`)
+      await loadBatch()
+    } catch (e) {
+      setError(`Adding files failed: ${e.message}`)
+    } finally {
+      setAddingFiles(false)
+      if (addFilesRef.current) addFilesRef.current.value = ''
+    }
+  }
+
   // Delete a batch that shouldn't exist (wrong file uploaded, duplicate, …).
   // Only offered pre-approval (`editable` statuses). Removes: uploaded batch
   // files + any generated exports (rows cascade with the batch; storage
@@ -733,8 +761,24 @@ export default function BatchDetail() {
 
           {/* Files */}
           <div style={{ backgroundColor: '#0f1620', border: '1px solid #182030', borderRadius: '14px', padding: '14px 16px' }}>
-            <div style={{ fontSize: '12px', fontWeight: '600', color: '#c0cad8', marginBottom: '10px' }}>Files ({files.length})</div>
-            {files.length === 0 && <div style={{ fontSize: '12px', color: '#4a5a6e' }}>No files attached.</div>}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <div style={{ fontSize: '12px', fontWeight: '600', color: '#c0cad8' }}>Files ({files.length})</div>
+              {editable && (
+                <button onClick={() => addFilesRef.current?.click()} disabled={addingFiles} style={{
+                  background: 'none', border: 'none', color: addingFiles ? '#5a6e84' : '#60a5fa',
+                  fontSize: '12px', fontWeight: '600', cursor: addingFiles ? 'not-allowed' : 'pointer', padding: 0,
+                }}>{addingFiles ? 'Uploading…' : '+ Add files'}</button>
+              )}
+            </div>
+            <input
+              ref={addFilesRef} type="file" multiple accept=".xlsx,.xls,.csv,.pdf"
+              onChange={(e) => handleAddFiles(e.target.files)} style={{ display: 'none' }}
+            />
+            {files.length === 0 && (
+              <div style={{ fontSize: '12px', color: '#4a5a6e' }}>
+                No files yet — awaiting the vendor&apos;s file.{editable ? ' Add it here when it arrives.' : ''}
+              </div>
+            )}
             {files.map(f => {
               const isSheet = SPREADSHEET.test(f.file_name)
               const parsed = f.parse_status === 'parsed'
