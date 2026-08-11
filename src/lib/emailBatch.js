@@ -32,8 +32,16 @@ const NON_VENDOR_DOMAINS = new Set([
 const NAME_STOPWORDS = new Set([
   'rubber', 'supply', 'company', 'corporation', 'incorporated', 'industries',
   'industrial', 'international', 'america', 'american', 'group', 'products',
-  'manufacturing', 'sales', 'service', 'services', 'hose', 'belt', 'belts',
-  'seal', 'seals', 'gasket', 'gaskets', 'power', 'north', 'south', 'east', 'west',
+  'manufacturing', 'sales', 'service', 'services', 'power', 'north', 'south',
+  'east', 'west',
+  // Product-category words: a price letter's body naturally mentions these
+  // ("...applies to all couplings and chain"), so they must never identify a
+  // vendor by themselves (learned from a real Tsubaki letter matching
+  // "PT Coupling" via the word "coupling").
+  'hose', 'hoses', 'belt', 'belts', 'seal', 'seals', 'gasket', 'gaskets',
+  'coupling', 'couplings', 'chain', 'chains', 'bearing', 'bearings',
+  'fitting', 'fittings', 'valve', 'valves', 'pump', 'pumps', 'clamp', 'clamps',
+  'sprocket', 'sprockets', 'pulley', 'pulleys', 'sheave', 'sheaves',
 ])
 
 const normText = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ')
@@ -65,16 +73,25 @@ function identifyVendor(vendors, { from, subject, bodyText, attachmentNames }) {
     if (v) return { vendor: v, method: `forwarded email headers (${d})` }
   }
 
-  const hay = ` ${normText(`${subject} ${(attachmentNames || []).join(' ')} ${String(bodyText || '').slice(0, 4000)}`)} `
-  const hits = []
-  for (const v of vendors) {
-    const tokens = normText(v.name).split(' ').filter(t => t.length >= 4 && !NAME_STOPWORDS.has(t))
-    const token = tokens.find(t => hay.includes(` ${t} `) || hay.includes(` ${t}`))
-    if (token) hits.push({ v, token })
+  // Two passes, narrow to wide: the subject + file names are deliberate,
+  // high-signal text (a unique hit there wins even if the body's prose
+  // mentions other vendor-ish words); the body is the wide fallback.
+  const findUnique = (hay) => {
+    const hits = []
+    for (const v of vendors) {
+      const tokens = normText(v.name).split(' ').filter(t => t.length >= 4 && !NAME_STOPWORDS.has(t))
+      const token = tokens.find(t => hay.includes(` ${t} `) || hay.includes(` ${t}`))
+      if (token) hits.push({ v, token })
+    }
+    return [...new Set(hits.map(h => h.v.id))].length === 1 ? hits[0] : null
   }
-  const uniqueVendors = [...new Set(hits.map(h => h.v.id))]
-  if (uniqueVendors.length === 1) {
-    return { vendor: hits[0].v, method: `name mention ("${hits[0].token}" in the subject/body/file name)` }
+  const narrow = findUnique(` ${normText(`${subject} ${(attachmentNames || []).join(' ')}`)} `)
+  if (narrow) {
+    return { vendor: narrow.v, method: `name mention ("${narrow.token}" in the subject/file name)` }
+  }
+  const wide = findUnique(` ${normText(`${subject} ${(attachmentNames || []).join(' ')} ${String(bodyText || '').slice(0, 4000)}`)} `)
+  if (wide) {
+    return { vendor: wide.v, method: `name mention ("${wide.token}" in the subject/body/file name)` }
   }
   return { vendor: null, method: null }
 }

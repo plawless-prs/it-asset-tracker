@@ -54,22 +54,48 @@ export async function uploadBatchFiles(supabase, { batchId, vendor, effectiveDat
   return uploaded.length
 }
 
-// POST the file to the server parse route -> { file, sheets:[{name,rows}], truncated }
+// POST the file to the server parse route -> { file, sheets:[{name,rows}], truncated }.
+// The route windows big sheets at 20k rows per response (Vercel response-size
+// cap), so this pages with `offset` until every sheet is complete — callers
+// always receive full sheets (`truncated` is false unless something failed).
 export async function fetchParsedSheets(supabase, fileId) {
   const { data: { session } } = await supabase.auth.getSession()
   if (!session) throw new Error('Not signed in')
-  const res = await fetch('/api/priceupdates/parse-file', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.access_token}`,
-    },
-    body: JSON.stringify({ file_id: fileId }),
-  })
-  let json = null
-  try { json = await res.json() } catch { /* non-JSON error */ }
-  if (!res.ok) throw new Error(json?.error || `Parse failed (${res.status})`)
-  return json
+
+  async function fetchWindow(offset) {
+    const res = await fetch('/api/priceupdates/parse-file', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ file_id: fileId, offset }),
+    })
+    let json = null
+    try { json = await res.json() } catch { /* non-JSON error */ }
+    if (!res.ok) throw new Error(json?.error || `Parse failed (${res.status})`)
+    return json
+  }
+
+  const first = await fetchWindow(0)
+  const sheets = (first.sheets || []).map(s => ({ ...s, rows: [...s.rows] }))
+  const windowSize = Math.max(...sheets.map(s => s.rows.length), 1)
+  const maxTotal = Math.max(...sheets.map(s => s.total_rows ?? s.rows.length), 0)
+
+  for (let offset = windowSize; offset < maxTotal; offset += windowSize) {
+    const page = await fetchWindow(offset)
+    for (const ps of page.sheets || []) {
+      const target = sheets.find(s => s.name === ps.name)
+      if (target && ps.rows.length) target.rows.push(...ps.rows)
+    }
+  }
+
+  const complete = sheets.every(s => s.rows.length >= (s.total_rows ?? s.rows.length))
+  return {
+    file: first.file,
+    sheets: sheets.map(({ name, rows }) => ({ name, rows })),
+    truncated: !complete,
+  }
 }
 
 function pickSheet(sheets, name) {

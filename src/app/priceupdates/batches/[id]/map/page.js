@@ -217,7 +217,7 @@ export default function MapBatch() {
             {sheets.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
           </select>
         )}
-        {truncated && <span style={{ fontSize: '12px', color: '#fbbf24' }}>Showing first 20,000 rows.</span>}
+        {truncated && <span style={{ fontSize: '12px', color: '#fbbf24' }}>Warning: could not fetch every row of this file — parsed output may be incomplete.</span>}
       </div>
 
       {parseError ? (

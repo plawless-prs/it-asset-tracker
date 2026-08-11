@@ -483,6 +483,36 @@ export default function BatchDetail() {
     }
   }
 
+  // Effective-date editing — email-intake batches arrive with no date, and a
+  // vendor notification can shift one. Drives the calendar, urgency pills,
+  // and reminders; the export file name year; and future archive folders
+  // (already-archived files keep their original folder).
+  const [dateEdit, setDateEdit] = useState(false)
+  const [savingDate, setSavingDate] = useState(false)
+  const dateInputRef = useRef(null)
+  async function saveEffectiveDate() {
+    const value = dateInputRef.current?.value || ''
+    setSavingDate(true); setError(''); setNotice('')
+    try {
+      const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ')
+      const activity = `[${stamp}] Effective date ${value ? `set to ${value}` : 'cleared'} by ${user?.email || 'unknown'}.`
+      const { error: e } = await supabase.from('pu_batches')
+        .update({
+          effective_date: value || null,
+          notes: batch.notes ? `${batch.notes}\n${activity}` : activity,
+        })
+        .eq('id', id)
+      if (e) throw e
+      setDateEdit(false)
+      await loadBatch()
+      setNotice(value ? `Effective date set to ${formatDate(value)}.` : 'Effective date cleared.')
+    } catch (e) {
+      setError(`Effective date change failed: ${e.message}`)
+    } finally {
+      setSavingDate(false)
+    }
+  }
+
   // Late file upload — a batch can be created as a scheduled placeholder
   // before the vendor releases the file ("Add files" on the Files card).
   // Same treatment as creation-time uploads: pu_batch_files rows + library
@@ -840,7 +870,39 @@ export default function BatchDetail() {
               )}
             </div>
             <SideRow label="Source" value={`${src.icon ? src.icon + ' ' : ''}${src.label || batch.source}`} />
-            <SideRow label="Effective date" value={formatDate(batch.effective_date)} />
+            {/* Effective date — editable pre-approval (drives the calendar,
+                urgency pills, and reminders). */}
+            <div style={{ marginBottom: '11px' }}>
+              <div style={{ fontSize: '10.5px', color: '#5a6e84', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '2px' }}>Effective date</div>
+              {!dateEdit ? (
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                  <span style={{ fontSize: '12.5px', color: batch.effective_date ? '#c0cad8' : '#f59e0b' }}>
+                    {batch.effective_date ? formatDate(batch.effective_date) : 'Not set'}
+                  </span>
+                  {editable && (
+                    <button onClick={() => setDateEdit(true)} style={{ background: 'none', border: 'none', color: '#60a5fa', fontSize: '11.5px', cursor: 'pointer', padding: 0 }}>
+                      {batch.effective_date ? 'change' : 'set'}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <input
+                    ref={dateInputRef}
+                    type="date"
+                    autoFocus
+                    defaultValue={batch.effective_date ? String(batch.effective_date).slice(0, 10) : ''}
+                    disabled={savingDate}
+                    style={{
+                      flex: 1, padding: '5px 8px', backgroundColor: '#131a24', border: '1px solid #1e2d40',
+                      borderRadius: '7px', color: '#c0cad8', fontSize: '12px', outline: 'none', colorScheme: 'dark',
+                    }}
+                  />
+                  <button onClick={saveEffectiveDate} disabled={savingDate} style={{ background: 'none', border: 'none', color: '#4ade80', fontSize: '13px', cursor: 'pointer', padding: 0 }}>✓</button>
+                  <button onClick={() => setDateEdit(false)} disabled={savingDate} style={{ background: 'none', border: 'none', color: '#5a6e84', fontSize: '12px', cursor: 'pointer', padding: 0 }}>✕</button>
+                </div>
+              )}
+            </div>
             <SideRow label="Received" value={`${formatDate(batch.received_at)} (${relativeTime(batch.received_at)})`} />
             <SideRow label="Lines" value={`${counts.all.toLocaleString()} · ${(batch.matched_count || 0).toLocaleString()} matched`} />
             <SideRow label="Flagged / Excluded" value={`${counts.flagged.toLocaleString()} / ${counts.excluded.toLocaleString()}`} last />

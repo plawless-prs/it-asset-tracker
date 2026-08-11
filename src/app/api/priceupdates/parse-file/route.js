@@ -12,7 +12,10 @@ import * as XLSX from 'xlsx'
 
 export const runtime = 'nodejs'
 
-const MAX_ROWS = 20000   // safety cap on rows returned per sheet
+// Rows per response window. One JSON response must stay under Vercel's ~4.5MB
+// function-response cap, so big sheets are fetched in windows: the client
+// (fetchParsedSheets) passes `offset` and stitches windows back together.
+const PAGE_ROWS = 20000
 
 export async function POST(req) {
   const accessToken = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')
@@ -32,6 +35,7 @@ export async function POST(req) {
   try { body = await req.json() } catch { return Response.json({ error: 'invalid json' }, { status: 400 }) }
   const fileId = body?.file_id
   if (!fileId) return Response.json({ error: 'file_id required' }, { status: 400 })
+  const offset = Math.max(0, Number(body?.offset) || 0)
 
   const { data: file, error: fErr } = await supabase
     .from('pu_batch_files').select('id, storage_path, file_name').eq('id', fileId).single()
@@ -48,13 +52,16 @@ export async function POST(req) {
     return Response.json({ error: 'Could not read this file as a spreadsheet: ' + String(e?.message || e) }, { status: 422 })
   }
 
+  // Window each sheet: rows [offset, offset + PAGE_ROWS). `truncated` = more
+  // rows exist past this window in at least one sheet; `total_rows` lets the
+  // client know when it has everything.
   let truncated = false
   const sheets = wb.SheetNames.map(name => {
     const ws = wb.Sheets[name]
-    let rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: null, blankrows: false })
-    if (rows.length > MAX_ROWS) { rows = rows.slice(0, MAX_ROWS); truncated = true }
-    return { name, rows }
+    const all = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: null, blankrows: false })
+    if (offset + PAGE_ROWS < all.length) truncated = true
+    return { name, rows: all.slice(offset, offset + PAGE_ROWS), total_rows: all.length }
   })
 
-  return Response.json({ file: { id: file.id, file_name: file.file_name }, sheets, truncated })
+  return Response.json({ file: { id: file.id, file_name: file.file_name }, sheets, truncated, offset })
 }
