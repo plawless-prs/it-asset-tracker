@@ -2,6 +2,10 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-08-11
+
+- **Price Update Processor — Phase 6a, email intake from `priceupdate@`:** vendor emails now auto-create batches instead of Help Desk tickets. The Graph webhook branches on the mailbox queue: dedupe on message id, **tiered vendor identification** (sender domain → addresses quoted in the body, catching internal forwards → unique vendor-name mention in subject/body/filenames; inferred guesses get a "verify" note), attachments stored as batch files (+ library archive; PDFs marked manual), body-only emails become fileless placeholder batches, and identified vendors queue a scoped mirror sync. Batch detail shows a "Source email" card and gains a **vendor assign/change control** (queues sync + re-runs matching). Parse profiles now store a header-row fingerprint for Phase 6b file-similarity matching. Auto-parse on arrival + the PDF split view are Phase 6b. No migration.
+
 ## 2026-08-10
 
 - **Price Update Processor — fileless (placeholder) batches:** files are now optional when creating a batch, so a price-update notification can be scheduled before the vendor releases the file; the batch shows an "Awaiting file" attention pill (also reflected in date-urgency pills and the reminder digest) and files are added later via "+ Add files" on the batch detail Files card — same upload + library-archive treatment as at creation (shared `uploadBatchFiles()` helper). No migration.

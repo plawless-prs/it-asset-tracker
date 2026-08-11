@@ -429,6 +429,60 @@ export default function BatchDetail() {
     }
   }
 
+  // Vendor assignment/correction — email-intake batches can arrive
+  // Unidentified (unknown sender domain) or with an inferred vendor guess.
+  // Changing the vendor queues a scoped mirror sync and re-runs matching so
+  // lines resolve against the right supplier.
+  const [vendorEdit, setVendorEdit] = useState(false)
+  const [allVendors, setAllVendors] = useState([])
+  const [savingVendor, setSavingVendor] = useState(false)
+  async function openVendorEdit() {
+    if (allVendors.length === 0) {
+      const { data } = await supabase.from('pu_vendors').select('id, name, p21_supplier_id').order('name')
+      setAllVendors(data || [])
+    }
+    setVendorEdit(true)
+  }
+  async function changeVendor(newId) {
+    setSavingVendor(true); setError(''); setNotice('')
+    try {
+      const newVendor = allVendors.find(v => v.id === newId) || null
+      const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ')
+      const activity = `[${stamp}] Vendor ${newVendor ? `set to ${newVendor.name}` : 'cleared'} by ${user?.email || 'unknown'}.`
+      const { error: e } = await supabase.from('pu_batches')
+        .update({
+          vendor_id: newId || null,
+          notes: batch.notes ? `${batch.notes}\n${activity}` : activity,
+        })
+        .eq('id', id)
+      if (e) throw e
+      if (newVendor?.p21_supplier_id) {
+        try {
+          await supabase.from('pu_sync_requests').insert({
+            supplier_id: String(newVendor.p21_supplier_id).trim(),
+            reason: 'batch_created',
+            requested_by: user?.id || null,
+          })
+        } catch { /* sync request is best-effort */ }
+      }
+      setVendorEdit(false)
+      await loadBatch()
+      if (counts.all > 0) {
+        try {
+          await triggerMatch(supabase, id)
+          await loadBatch(); await loadCounts(); await loadLines()
+          setNotice(`Vendor updated — matching re-run against ${newVendor?.name || 'no vendor'}.`)
+        } catch { setNotice('Vendor updated. Re-run matching to resolve lines against the new vendor.') }
+      } else {
+        setNotice('Vendor updated.')
+      }
+    } catch (e) {
+      setError(`Vendor change failed: ${e.message}`)
+    } finally {
+      setSavingVendor(false)
+    }
+  }
+
   // Late file upload — a batch can be created as a scheduled placeholder
   // before the vendor releases the file ("Add files" on the Files card).
   // Same treatment as creation-time uploads: pu_batch_files rows + library
@@ -751,13 +805,60 @@ export default function BatchDetail() {
 
           {/* Properties */}
           <div style={{ backgroundColor: '#0f1620', border: '1px solid #182030', borderRadius: '14px', padding: '16px' }}>
-            <SideRow label="Vendor" value={batch.vendor?.name || 'Unidentified'} />
+            {/* Vendor — assignable while editable (email intake can leave it
+                Unidentified, or guess wrong from subject/body clues). */}
+            <div style={{ marginBottom: '11px' }}>
+              <div style={{ fontSize: '10.5px', color: '#5a6e84', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '2px' }}>Vendor</div>
+              {!vendorEdit ? (
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                  <span style={{ fontSize: '12.5px', color: batch.vendor ? '#c0cad8' : '#f59e0b' }}>
+                    {batch.vendor?.name || 'Unidentified'}
+                  </span>
+                  {editable && (
+                    <button onClick={openVendorEdit} style={{ background: 'none', border: 'none', color: '#60a5fa', fontSize: '11.5px', cursor: 'pointer', padding: 0 }}>
+                      {batch.vendor ? 'change' : 'assign'}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <select
+                    autoFocus
+                    defaultValue={batch.vendor?.id || ''}
+                    disabled={savingVendor}
+                    onChange={(e) => changeVendor(e.target.value)}
+                    style={{
+                      flex: 1, padding: '6px 8px', backgroundColor: '#131a24', border: '1px solid #1e2d40',
+                      borderRadius: '7px', color: '#c0cad8', fontSize: '12px', outline: 'none',
+                    }}
+                  >
+                    <option value="">Unidentified</option>
+                    {allVendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                  </select>
+                  <button onClick={() => setVendorEdit(false)} disabled={savingVendor} style={{ background: 'none', border: 'none', color: '#5a6e84', fontSize: '12px', cursor: 'pointer' }}>✕</button>
+                </div>
+              )}
+            </div>
             <SideRow label="Source" value={`${src.icon ? src.icon + ' ' : ''}${src.label || batch.source}`} />
             <SideRow label="Effective date" value={formatDate(batch.effective_date)} />
             <SideRow label="Received" value={`${formatDate(batch.received_at)} (${relativeTime(batch.received_at)})`} />
             <SideRow label="Lines" value={`${counts.all.toLocaleString()} · ${(batch.matched_count || 0).toLocaleString()} matched`} />
             <SideRow label="Flagged / Excluded" value={`${counts.flagged.toLocaleString()} / ${counts.excluded.toLocaleString()}`} last />
           </div>
+
+          {/* Source email (Phase 6a — batches created from priceupdate@) */}
+          {batch.source === 'email' && (batch.email_from || batch.email_subject || batch.email_body) && (
+            <div style={{ backgroundColor: '#0f1620', border: '1px solid #182030', borderRadius: '14px', padding: '14px 16px' }}>
+              <div style={{ fontSize: '12px', fontWeight: '600', color: '#c0cad8', marginBottom: '8px' }}>Source email</div>
+              {batch.email_from && <div style={{ fontSize: '12px', color: '#8aa0b8', marginBottom: '3px' }}>From: <span style={{ color: '#d0d8e4' }}>{batch.email_from}</span></div>}
+              {batch.email_subject && <div style={{ fontSize: '12px', color: '#8aa0b8', marginBottom: '6px' }}>Subject: <span style={{ color: '#d0d8e4' }}>{batch.email_subject}</span></div>}
+              {batch.email_body && (
+                <div style={{ fontSize: '11.5px', color: '#8aa0b8', whiteSpace: 'pre-wrap', maxHeight: '140px', overflowY: 'auto', borderTop: '1px solid #182030', paddingTop: '6px' }}>
+                  {batch.email_body}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Files */}
           <div style={{ backgroundColor: '#0f1620', border: '1px solid #182030', borderRadius: '14px', padding: '14px 16px' }}>

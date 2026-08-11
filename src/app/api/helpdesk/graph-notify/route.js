@@ -2,9 +2,13 @@
 // 1) Subscription validation: Graph POSTs with ?validationToken=... and expects
 //    the token echoed back as text/plain within 10s.
 // 2) Notifications: Graph POSTs { value: [ ... ] } when a new email arrives.
-//    We verify clientState, fetch the message, and create a ticket (de-duped).
+//    We verify clientState and branch on the queue embedded in it:
+//    'priceupdate' -> a Price Update Processor batch (Phase 6a; attachments
+//    and body captured, deduped on message id); anything else -> a Help Desk
+//    ticket (de-duped the same way). priceupdate@ no longer creates tickets.
 import { createEmailTicket } from '../../../../lib/emailTicket'
-import { fetchMessage } from '../../../../lib/graph'
+import { createEmailBatch } from '../../../../lib/emailBatch'
+import { fetchMessage, fetchMessageFull } from '../../../../lib/graph'
 
 export const runtime = 'nodejs'
 
@@ -39,15 +43,21 @@ export async function POST(req) {
       const mailbox = extractMailbox(n.resource)
       const messageId = n.resourceData?.id
       if (!mailbox || !messageId) continue
-      const msg = await fetchMessage(mailbox, messageId)
       const queueFromState = cs.includes('|') ? cs.slice(cs.indexOf('|') + 1) : null
-      await createEmailTicket({
-        from: msg?.from?.emailAddress?.address || '',
-        subject: msg?.subject || '',
-        text: msg?.bodyPreview || '',
-        queue: queueFromState || mailboxToQueue(mailbox),
-        messageId,
-      })
+      const queue = queueFromState || mailboxToQueue(mailbox)
+      if (queue === 'priceupdate') {
+        const msg = await fetchMessageFull(mailbox, messageId)
+        await createEmailBatch({ mailbox, messageId, msg })
+      } else {
+        const msg = await fetchMessage(mailbox, messageId)
+        await createEmailTicket({
+          from: msg?.from?.emailAddress?.address || '',
+          subject: msg?.subject || '',
+          text: msg?.bodyPreview || '',
+          queue,
+          messageId,
+        })
+      }
     } catch (e) {
       console.error('graph-notify error:', e)
       // Swallow so one bad message doesn't fail the whole batch / cause retries.

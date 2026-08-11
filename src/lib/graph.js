@@ -45,6 +45,31 @@ export async function fetchMessage(mailbox, messageId) {
   return graph(p)
 }
 
+// Full message incl. body + attachment flag — used by the price-update email
+// intake, which stores the body on the batch (body-only price emails).
+export async function fetchMessageFull(mailbox, messageId) {
+  const p = `/users/${encodeURIComponent(mailbox)}/messages/${messageId}?$select=from,subject,body,bodyPreview,receivedDateTime,hasAttachments`
+  return graph(p)
+}
+
+// List a message's attachments. fileAttachment items usually include base64
+// contentBytes inline; for large ones Graph omits it, so fall back to the
+// raw /$value stream per attachment.
+export async function fetchAttachments(mailbox, messageId) {
+  const base = `/users/${encodeURIComponent(mailbox)}/messages/${messageId}/attachments`
+  const j = await graph(base)
+  const items = (j?.value || []).filter(a => a['@odata.type'] === '#microsoft.graph.fileAttachment')
+  for (const a of items) {
+    if (a.contentBytes) continue
+    const token = await getAppToken()
+    const r = await fetch(`https://graph.microsoft.com/v1.0${base}/${a.id}/$value`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (r.ok) a.contentBytes = Buffer.from(await r.arrayBuffer()).toString('base64')
+  }
+  return items
+}
+
 export async function sendGraphMail(mailbox, to, subject, body) {
   await graph(`/users/${encodeURIComponent(mailbox)}/sendMail`, {
     method: 'POST',

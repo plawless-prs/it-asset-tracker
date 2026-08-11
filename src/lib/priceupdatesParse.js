@@ -123,12 +123,20 @@ export async function applyParse(supabase, { batch, file, sheets, config, userId
   const { lines, skippedNoPrice } = buildLinesFromRows(sheet.rows, config)
   if (lines.length === 0) throw new Error('This mapping produced no usable price lines')
 
-  // Save the profile first so the file can reference it.
+  // Save the profile first so the file can reference it. The header-row text
+  // is stashed in the config as a fingerprint (`header_signature`) so future
+  // email intake can recognize "this file looks like Gates' usual sheet" and
+  // Phase 6b can pick the right profile automatically.
   let profileId = null
   if (saveProfile && batch.vendor_id) {
+    const headerRow = sheet.rows[config.header_row] || []
+    const configToSave = {
+      ...config,
+      header_signature: headerRow.map(c => String(c ?? '').trim()).filter(Boolean).slice(0, 30),
+    }
     const { data: prof, error: pErr } = await supabase
       .from('pu_parse_profiles')
-      .insert({ vendor_id: batch.vendor_id, label: saveProfile.label || 'Default', config, created_by: userId })
+      .insert({ vendor_id: batch.vendor_id, label: saveProfile.label || 'Default', config: configToSave, created_by: userId })
       .select('id').single()
     if (pErr) throw pErr
     profileId = prof.id
