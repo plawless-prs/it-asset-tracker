@@ -273,6 +273,16 @@ Storage: one **private** bucket `price-files` for inbound files and generated ex
 
 ---
 
+## PHASE 8 — Backlog (ideas, not committed; researched 2026-08-11 against SPARXiQ / epaCUBE / Pricefx / Conexiom)
+
+Candidate features in rough priority order — each needs its own proposal + approval before building:
+
+1. **Cost-change impact analysis** (headliner): rank review lines by dollar impact, not just Δ% — mirror trailing-12-month purchase qty (and/or on-hand) per item from the P21 replica via the sync worker, show annualized spend impact per line + batch total, sortable in the review grid. What SPARXiQ/epaCUBE sell; very feasible with the replica.
+2. **Per-item cost history:** `pu_lines` already accumulates a cost timeline across batches/years — a history popover on a review line (prior costs, dates, batches) for spotting compounding increases and negotiating.
+3. **UOM-change detection guardrail:** catch the per-each vs per-hundred vendor-file trap by comparing the implied magnitude shift against the mirror's UOM (batch-wide flag, not per line).
+4. **Pipeline metrics on the dashboard:** % auto-matched, received→applied cycle time, updates per vendor per year.
+5. **EDI 832 price catalogs:** standards-based intake path for big manufacturers, alongside email. Large lift; only if volume justifies it.
+
 ## Out of scope (explicitly)
 
 - **Writing to P21 via the Transaction API** — future phase, after the export flow has run reliably for a while.
