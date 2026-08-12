@@ -6,11 +6,17 @@
 //    'priceupdate' -> a Price Update Processor batch (Phase 6a; attachments
 //    and body captured, deduped on message id); anything else -> a Help Desk
 //    ticket (de-duped the same way). priceupdate@ no longer creates tickets.
+import { after } from 'next/server'
 import { createEmailTicket } from '../../../../lib/emailTicket'
 import { createEmailBatch } from '../../../../lib/emailBatch'
+import { autoParseBatch } from '../../../../lib/autoParse'
 import { fetchMessage, fetchMessageFull } from '../../../../lib/graph'
 
 export const runtime = 'nodejs'
+// Auto-parse + matching on big vendor files runs after the response (via
+// after()) but still inside this invocation's window — same budget as the
+// match route.
+export const maxDuration = 120
 
 function mailboxToQueue(mailbox) {
   const m = String(mailbox || '').toLowerCase()
@@ -47,7 +53,15 @@ export async function POST(req) {
       const queue = queueFromState || mailboxToQueue(mailbox)
       if (queue === 'priceupdate') {
         const msg = await fetchMessageFull(mailbox, messageId)
-        await createEmailBatch({ mailbox, messageId, msg })
+        const result = await createEmailBatch({ mailbox, messageId, msg })
+        // Phase 6b: parse + match in the background so a known vendor's file
+        // lands in the queue already at needs_review. after() lets Graph get
+        // its 2xx first; failures just leave the files pending for manual
+        // mapping (and a note on the batch).
+        if (result?.data?.id && result.files > 0) {
+          const batchId = result.data.id
+          after(() => autoParseBatch(batchId).catch(e => console.error('autoParseBatch:', e)))
+        }
       } else {
         const msg = await fetchMessage(mailbox, messageId)
         await createEmailTicket({

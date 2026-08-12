@@ -5,48 +5,10 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '../../../../../lib/supabase'
 import { useRole } from '../../../../../lib/useRole'
-import { MAPPING_FIELDS, buildLinesFromRows, formatCurrency } from '../../../../../lib/priceupdates'
+import { MAPPING_FIELDS, buildLinesFromRows, formatCurrency, colLabel, guessHeaderRow, guessColumns } from '../../../../../lib/priceupdates'
 import { fetchParsedSheets, applyParse, triggerMatch } from '../../../../../lib/priceupdatesParse'
 
 const SPREADSHEET = /\.(xlsx|xls|csv)$/i
-
-// Spreadsheet-style column label: 0->A, 25->Z, 26->AA …
-function colLabel(i) {
-  let s = ''
-  let n = i
-  do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1 } while (n >= 0)
-  return s
-}
-
-// Light auto-guessing so a fresh file lands mostly pre-mapped.
-const FIELD_HINTS = {
-  vendor_item_no: /item|part|sku|catalog|model|stock|product|number|\bno\.?\b|#/i,
-  description:    /desc|description|name/i,
-  uom:            /\buom\b|unit|measure/i,
-  cost:           /\bcost\b|\bnet\b|your\s*price|dealer|buy/i,
-  list:           /list|msrp|retail|sell/i,
-}
-function guessHeaderRow(rows) {
-  for (let i = 0; i < Math.min(rows.length, 15); i++) {
-    const cells = (rows[i] || []).filter(c => c !== null && c !== undefined && String(c).trim() !== '')
-    const texty = cells.filter(c => isNaN(Number(String(c).replace(/[$,\s]/g, '')))).length
-    if (cells.length >= 2 && texty >= Math.ceil(cells.length / 2)) return i
-  }
-  return 0
-}
-function guessColumns(headerCells) {
-  const cols = {}
-  const taken = new Set()
-  for (const field of MAPPING_FIELDS) {
-    const rx = FIELD_HINTS[field.key]
-    for (let c = 0; c < headerCells.length; c++) {
-      if (taken.has(c)) continue
-      const txt = String(headerCells[c] ?? '')
-      if (txt.trim() && rx.test(txt)) { cols[field.key] = c; taken.add(c); break }
-    }
-  }
-  return cols
-}
 
 const inputStyle = {
   width: '100%', padding: '8px 10px', backgroundColor: '#131a24', border: '1px solid #1e2d40',

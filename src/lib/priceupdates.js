@@ -195,6 +195,45 @@ export const MAPPING_FIELDS = [
   { key: 'list',           label: 'List' },
 ]
 
+// Spreadsheet-style column label: 0->A, 25->Z, 26->AA … (shared by the
+// mapping UI and the PDF quick-entry grid).
+export function colLabel(i) {
+  let s = ''
+  let n = i
+  do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1 } while (n >= 0)
+  return s
+}
+
+// Light auto-guessing so a fresh file/paste lands mostly pre-mapped.
+const FIELD_HINTS = {
+  vendor_item_no: /item|part|sku|catalog|model|stock|product|number|\bno\.?\b|#/i,
+  description:    /desc|description|name/i,
+  uom:            /\buom\b|unit|measure/i,
+  cost:           /\bcost\b|\bnet\b|your\s*price|dealer|buy/i,
+  list:           /list|msrp|retail|sell/i,
+}
+export function guessHeaderRow(rows) {
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const cells = (rows[i] || []).filter(c => c !== null && c !== undefined && String(c).trim() !== '')
+    const texty = cells.filter(c => isNaN(Number(String(c).replace(/[$,\s]/g, '')))).length
+    if (cells.length >= 2 && texty >= Math.ceil(cells.length / 2)) return i
+  }
+  return 0
+}
+export function guessColumns(headerCells) {
+  const cols = {}
+  const taken = new Set()
+  for (const field of MAPPING_FIELDS) {
+    const rx = FIELD_HINTS[field.key]
+    for (let c = 0; c < headerCells.length; c++) {
+      if (taken.has(c)) continue
+      const txt = String(headerCells[c] ?? '')
+      if (txt.trim() && rx.test(txt)) { cols[field.key] = c; taken.add(c); break }
+    }
+  }
+  return cols
+}
+
 // Defensive numeric parse: strips $, commas, spaces, and accounting parens.
 // Blank / non-numeric returns null (blank is NOT zero).
 export function parseNumber(v) {

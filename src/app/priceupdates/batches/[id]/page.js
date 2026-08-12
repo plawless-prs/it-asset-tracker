@@ -965,6 +965,11 @@ export default function BatchDetail() {
                         {parsed ? 'Re-map' : 'Map columns'}
                       </Link>
                     )}
+                    {/\.pdf$/i.test(f.file_name) && editable && (
+                      <Link href={`/priceupdates/batches/${id}/pdf?file=${f.id}`} style={{ ...miniBtn(parsed ? '#1e2a3a' : '#2563eb', parsed ? '#60a5fa' : '#fff'), textDecoration: 'none', display: 'inline-block' }}>
+                        {parsed ? 'Re-enter lines' : 'Enter lines'}
+                      </Link>
+                    )}
                     <button onClick={() => downloadFile(f)} style={miniBtn('#1e2a3a', '#8aa0b8')}>Download</button>
                   </div>
                 </div>

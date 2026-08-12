@@ -2,6 +2,10 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-08-12
+
+- **Price Update Processor — Phase 6b, auto-parse on arrival + PDF split view:** an emailed file from a vendor with a saved parse profile now parses **and matches automatically** on arrival (scheduled after the Graph webhook responds via `after()`), so the batch lands in the queue at `needs_review` untouched — profile picked by header-signature recognition (tolerant of shifted header rows), every outcome logged to the batch's activity notes, unrecognizable files left `pending` for manual mapping. The match core moved to `src/lib/matchBatch.js` (the API route now delegates). New **PDF quick-entry split view** (`/priceupdates/batches/[id]/pdf`, "Enter lines" on PDF files): the PDF beside a paste-friendly grid — paste rows out of the PDF, map columns like the spreadsheet mapping UI, Apply writes lines through the normal parse/match path. No migration.
+
 ## 2026-08-11
 
 - **Price Update Processor — 20k-row parse cap removed; effective date editable:** the parse route's hard 20,000-row truncation (a Vercel response-size guard that silently dropped lines past 19,999) is now windowed paging — `fetchParsedSheets` stitches complete sheets of any size. The batch detail Properties card gains an effective-date set/change control (pre-approval), needed for email-intake batches which arrive dateless. Also: vendor-name matching refinements from live testing (product-category stopwords; subject/filename mentions outrank body text).
