@@ -143,9 +143,19 @@ export async function matchBatch(admin, batchId) {
     return { id: l.id, match_status: 'unmatched', p21_item_id: null, old_cost: null, old_list: null, cost_change_pct: null, flag: 'new' }
   })
 
-  // Bulk-apply via the migration-defined function (chunked; leaves `include` alone).
-  for (let i = 0; i < updates.length; i += 5000) {
-    const { error } = await admin.rpc('pu_apply_matches', { _updates: updates.slice(i, i + 5000) })
+  // Bulk-apply via the migration-defined function (chunked; leaves `include`
+  // alone). Chunks are sized so each UPDATE finishes well inside the role's
+  // statement timeout even right after a bulk insert — 5k-row chunks ran
+  // 5–11s healthy and blew the timeout when caches/stats were cold (batch #12
+  // post-mortem). A timed-out chunk gets one retry after a beat.
+  const RPC_CHUNK = 1000
+  for (let i = 0; i < updates.length; i += RPC_CHUNK) {
+    const slice = updates.slice(i, i + RPC_CHUNK)
+    let { error } = await admin.rpc('pu_apply_matches', { _updates: slice })
+    if (error && /statement timeout/i.test(error.message)) {
+      await new Promise(r => setTimeout(r, 2000))
+      ;({ error } = await admin.rpc('pu_apply_matches', { _updates: slice }))
+    }
     if (error) fail(error.message)
   }
 

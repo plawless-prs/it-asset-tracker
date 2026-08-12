@@ -115,10 +115,19 @@ export async function autoParseBatch(batchId) {
 
   // Match everything that just parsed. Best-effort: a stale/empty mirror or a
   // vendor without a supplier id still leaves a reviewable parsed batch.
+  // On-arrival is the riskiest moment for DB timing (the lines were bulk-
+  // inserted seconds ago, the scoped mirror sync may just have churned the
+  // mirror), so a failed pass gets one full retry — matchBatch is idempotent.
   let matchSummary = null
   if (parsedFiles > 0) {
     try {
-      const r = await matchBatch(admin, batchId)
+      let r
+      try {
+        r = await matchBatch(admin, batchId)
+      } catch {
+        await new Promise(res => setTimeout(res, 5000))
+        r = await matchBatch(admin, batchId)
+      }
       matchSummary = r
       activity.push(`[${stamp()}] Auto-matched: ${r.matched} matched, ${r.ambiguous} ambiguous, ${r.unmatched} unmatched.${r.warning ? ` (${r.warning})` : ''}`)
     } catch (e) {
