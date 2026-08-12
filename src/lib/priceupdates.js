@@ -135,7 +135,12 @@ export function formatCurrency(n) {
 
 export function formatDate(dateStr) {
   if (!dateStr) return '—'
-  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  // Date-only strings (effective_date etc.) are calendar dates, not instants:
+  // new Date('2026-09-01') parses as UTC midnight, which is the previous
+  // evening in Central and rendered a day early. Build those as local dates.
+  const m = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(dateStr)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 // Library storage-key helpers (Phase 5.5): keys look like

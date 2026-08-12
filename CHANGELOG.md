@@ -4,6 +4,7 @@ Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYY
 
 ## 2026-08-12
 
+- **Price Update Processor — effective dates displayed a day early (fixed):** `formatDate` parsed date-only strings as UTC midnight, so `2026-09-01` rendered as Aug 31 in Central everywhere effective dates show (batch detail, calendar agenda/peek). Date-only strings now format as calendar dates; stored values were always correct.
 - **Price Update Processor — Phase 6b, auto-parse on arrival + PDF split view:** an emailed file from a vendor with a saved parse profile now parses **and matches automatically** on arrival (scheduled after the Graph webhook responds via `after()`), so the batch lands in the queue at `needs_review` untouched — profile picked by header-signature recognition (tolerant of shifted header rows), every outcome logged to the batch's activity notes, unrecognizable files left `pending` for manual mapping. The match core moved to `src/lib/matchBatch.js` (the API route now delegates). New **PDF quick-entry split view** (`/priceupdates/batches/[id]/pdf`, "Enter lines" on PDF files): the PDF beside a paste-friendly grid — paste rows out of the PDF, map columns like the spreadsheet mapping UI, Apply writes lines through the normal parse/match path. No migration.
 
 ## 2026-08-11
