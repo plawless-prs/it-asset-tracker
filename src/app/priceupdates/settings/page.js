@@ -188,18 +188,73 @@ export default function PriceUpdatesSettings() {
 
           <ReminderCard supabase={supabase} settings={settings} card={card} labelStyle={labelStyle} onSaved={load} />
 
-          <div style={card}>
-            <div style={{ fontSize: '14px', fontWeight: '600', color: '#c0cad8', marginBottom: '12px' }}>
-              Guardrails <span style={{ fontSize: '11.5px', color: '#5a6e84', fontWeight: '400' }}>(editable in a later phase)</span>
-            </div>
-            <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap' }}>
-              <div><div style={labelStyle}>Large increase over</div><div style={{ fontSize: '14px', color: '#c0cad8' }}>{settings?.large_increase_pct ?? 20}%</div></div>
-              <div><div style={labelStyle}>Flag decreases</div><div style={{ fontSize: '14px', color: '#c0cad8' }}>{(settings?.flag_decreases ?? true) ? 'Yes' : 'No'}</div></div>
-              <div><div style={labelStyle}>Flag cost over list</div><div style={{ fontSize: '14px', color: '#c0cad8' }}>{(settings?.flag_cost_over_list ?? true) ? 'Yes' : 'No'}</div></div>
-            </div>
-          </div>
+          <GuardrailCard supabase={supabase} settings={settings} card={card} labelStyle={labelStyle} onSaved={load} />
         </>
       )}
+    </div>
+  )
+}
+
+// Guardrail thresholds (pu_settings, single row). Applied by computeFlag() at
+// match time — edits take effect the next time a batch is matched/re-matched,
+// they don't retroactively re-flag reviewed batches.
+function GuardrailCard({ supabase, settings, card, labelStyle, onSaved }) {
+  const [pct, setPct] = useState(String(settings?.large_increase_pct ?? 20))
+  const [decreases, setDecreases] = useState(settings?.flag_decreases ?? true)
+  const [costOverList, setCostOverList] = useState(settings?.flag_cost_over_list ?? true)
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  const pctNum = Number(pct)
+  const pctValid = pct.trim() !== '' && isFinite(pctNum) && pctNum >= 0
+
+  async function save() {
+    if (!pctValid) { setMsg('Error: the increase threshold must be a number ≥ 0.'); return }
+    setSaving(true); setMsg('')
+    const { error } = await supabase.from('pu_settings')
+      .update({ large_increase_pct: pctNum, flag_decreases: decreases, flag_cost_over_list: costOverList })
+      .eq('id', 1)
+    setSaving(false)
+    if (error) { setMsg(`Error: ${error.message}`); return }
+    setMsg('Saved — applies the next time a batch is matched or re-matched.')
+    onSaved?.()
+  }
+
+  const checkbox = (checked, onChange, label) => (
+    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#c0cad8', cursor: 'pointer' }}>
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} style={{ accentColor: '#2563eb', width: '16px', height: '16px' }} />
+      {label}
+    </label>
+  )
+
+  return (
+    <div style={card}>
+      <div style={{ fontSize: '14px', fontWeight: '600', color: '#c0cad8', marginBottom: '12px' }}>Guardrails</div>
+      <div style={{ display: 'flex', gap: '28px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div>
+          <div style={labelStyle}>Flag increases over (%)</div>
+          <input
+            value={pct} onChange={e => setPct(e.target.value)} inputMode="decimal"
+            style={{
+              width: '90px', padding: '9px 12px', backgroundColor: '#131a24',
+              border: `1px solid ${pctValid ? '#1e2d40' : '#991b1b'}`, borderRadius: '8px',
+              color: '#c0cad8', fontSize: '13px', outline: 'none',
+            }}
+          />
+        </div>
+        {checkbox(decreases, setDecreases, 'Flag decreases')}
+        {checkbox(costOverList, setCostOverList, 'Flag cost over list')}
+        <button onClick={save} disabled={saving} style={{
+          padding: '9px 16px', borderRadius: '10px', fontSize: '13px', fontWeight: '600',
+          backgroundColor: saving ? '#1e40af' : '#2563eb', color: '#fff', border: 'none',
+          cursor: saving ? 'not-allowed' : 'pointer',
+        }}>{saving ? 'Saving…' : 'Save'}</button>
+      </div>
+      <div style={{ fontSize: '11.5px', color: '#5a6e84', marginTop: '12px' }}>
+        Guardrails flag review lines: a cost increase above the threshold, any decrease, or a cost above
+        list price. Changes apply at the next matching run — re-run matching on an open batch to re-flag it.
+      </div>
+      {msg && <div style={{ marginTop: '10px', fontSize: '12.5px', color: msg.startsWith('Error') ? '#f87171' : '#4ade80' }}>{msg}</div>}
     </div>
   )
 }

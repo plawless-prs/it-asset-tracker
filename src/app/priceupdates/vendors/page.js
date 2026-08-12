@@ -4,26 +4,29 @@ import { useEffect, useState } from 'react'
 import { createClient } from '../../../lib/supabase'
 import VendorModal from '../../../components/VendorModal'
 
-// Phase 3: minimal vendor management — enough to set the P21 supplier id +
-// item prefix that matching needs. Full CRUD + parse-profile listing: Phase 7.
+// Vendor management (full CRUD as of Phase 7): P21 supplier id + item prefix
+// (what matching needs), email domains (email intake identification), notes,
+// active flag, and each vendor's saved parse profiles (managed in the modal).
 export default function VendorsPage() {
   const supabase = createClient()
   const [vendors, setVendors] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [editing, setEditing] = useState(null)   // vendor object, or {} for new
 
   async function load() {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('pu_vendors')
-      .select('id, name, p21_supplier_id, p21_item_prefix, email_domains, active')
+      .select('id, name, p21_supplier_id, p21_item_prefix, email_domains, notes, active, profiles:pu_parse_profiles(count), batches:pu_batches(count)')
       .order('name')
+    setLoadError(error?.message || '')
     setVendors(data || [])
     setLoading(false)
   }
 
   useEffect(() => { load() }, [])
 
-  const GRID = '1.4fr 120px 110px 1.4fr 80px'
+  const GRID = '1.4fr 110px 90px 1.2fr 84px 84px 80px'
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: '960px' }}>
@@ -44,13 +47,17 @@ export default function VendorsPage() {
           borderBottom: '1px solid #182030', fontSize: '11px', color: '#5a6e84',
           textTransform: 'uppercase', letterSpacing: '0.05em',
         }}>
-          <div>Vendor</div><div>P21 supplier</div><div>Prefix</div><div>Email domains</div><div>Active</div>
+          <div>Vendor</div><div>P21 supplier</div><div>Prefix</div><div>Email domains</div><div>Profiles</div><div>Batches</div><div>Active</div>
         </div>
 
         {loading ? (
           <div style={{ padding: '40px', textAlign: 'center', color: '#5a6e84' }}>Loading…</div>
+        ) : loadError ? (
+          <div style={{ padding: '40px', textAlign: 'center', color: '#f87171', fontSize: '13px' }}>Could not load vendors: {loadError}</div>
         ) : vendors.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#4a5a6e' }}>No vendors yet.</div>
+          <div style={{ padding: '40px', textAlign: 'center', color: '#4a5a6e' }}>
+            No vendors yet — add the suppliers who send you price updates.
+          </div>
         ) : vendors.map(v => (
           <div
             key={v.id}
@@ -69,6 +76,12 @@ export default function VendorsPage() {
             </div>
             <div style={{ fontSize: '12px', color: '#8aa0b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {(v.email_domains || []).join(', ') || '—'}
+            </div>
+            <div style={{ fontSize: '12.5px', color: (v.profiles?.[0]?.count || 0) > 0 ? '#c0cad8' : '#4a5a6e' }}>
+              {v.profiles?.[0]?.count || 0}
+            </div>
+            <div style={{ fontSize: '12.5px', color: (v.batches?.[0]?.count || 0) > 0 ? '#c0cad8' : '#4a5a6e' }}>
+              {v.batches?.[0]?.count || 0}
             </div>
             <div>
               <span style={{

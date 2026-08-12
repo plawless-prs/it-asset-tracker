@@ -11,6 +11,7 @@ import {
   costChangePct, computeFlag, normalizePart,
 } from '../../../../lib/priceupdates'
 import { fetchParsedSheets, applyParse, triggerMatch, generateExport, uploadBatchFiles } from '../../../../lib/priceupdatesParse'
+import { useToasts, Toasts } from '../../../../components/Toast'
 
 const SPREADSHEET = /\.(xlsx|xls|csv)$/i
 const PAGE_SIZE = 100
@@ -69,6 +70,7 @@ export default function BatchDetail() {
   const [applying, setApplying] = useState(false)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
+  const { toasts, toast } = useToasts()
   const [mirrorSyncedAt, setMirrorSyncedAt] = useState(null)
   const [libraryFiles, setLibraryFiles] = useState([])
 
@@ -333,7 +335,7 @@ export default function BatchDetail() {
         notes: batch.notes ? `${batch.notes}\n${activity}` : activity,
       }).eq('id', id)
       if (e) throw e
-      setNotice(`Approved — ${included} lines ready for export${confirmedBit ? ` (${confirmed} auto-picks confirmed & remembered)` : ''}.`)
+      toast(`Approved — ${included} lines ready for export${confirmedBit ? ` (${confirmed} auto-picks confirmed & remembered)` : ''}.`)
       setSelected(new Set()); setEditing(null)
       await loadBatch(); await loadCounts(); await loadLines()
     } catch (e) {
@@ -358,7 +360,7 @@ export default function BatchDetail() {
     try {
       const r = await generateExport(supabase, id)
       if (r.signedUrl) window.open(r.signedUrl, '_blank')
-      setNotice(`Export generated — ${r.file_name}, ${r.row_count.toLocaleString()} lines. Load it into P21's import tool, then mark the batch applied.`)
+      toast(`Export generated — ${r.file_name}, ${r.row_count.toLocaleString()} lines. Load it into P21's import tool, then mark the batch applied.`)
       await loadBatch()
     } catch (e) {
       setError(`Export failed: ${e.message}`)
@@ -385,7 +387,7 @@ export default function BatchDetail() {
         applied_by: user?.id || null,
       }, `Marked applied in P21 by ${who}.`)).eq('id', id)
       if (e) throw e
-      setNotice('Batch marked applied — the loop is closed.')
+      toast('Batch marked applied — the loop is closed.')
       await loadBatch()
     } catch (e) {
       setError(`Update failed: ${e.message}`)
@@ -400,6 +402,7 @@ export default function BatchDetail() {
       { status: 'archived' }, `Archived by ${user?.email || 'unknown'}.`
     )).eq('id', id)
     if (e) return setError(`Archive failed: ${e.message}`)
+    toast('Batch archived.')
     await loadBatch()
   }
 
@@ -1046,6 +1049,8 @@ export default function BatchDetail() {
           onClose={() => setSearchLine(null)}
         />
       )}
+
+      <Toasts toasts={toasts} />
     </div>
   )
 }
