@@ -111,7 +111,12 @@ export function formatCurrency(n, { blankDash = false } = {}) {
 
 export function formatDate(d) {
   if (!d) return '—'
-  return new Date(d).toLocaleDateString('en-US', {
+  // Date-only strings (purchase_date etc.) are calendar dates, not instants:
+  // new Date('2026-09-01') parses as UTC midnight, which is the previous
+  // evening in Central and rendered a day early. Build those as local dates.
+  const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  const dt = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(d)
+  return dt.toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
   })
 }
