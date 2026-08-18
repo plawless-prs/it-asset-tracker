@@ -30,10 +30,11 @@ export function getP21SqlPool() {
       database: process.env.P21_SQL_DATABASE,
       user: process.env.P21_SQL_USERNAME,
       password: process.env.P21_SQL_PASSWORD,
-      // P21_SQL_TRUST_CERT=true accepts the replica's certificate without CA
-      // validation (Epicor began presenting a self-signed cert in Aug 2026).
-      // Traffic is still TLS-encrypted either way.
-      options: { encrypt: true, trustServerCertificate: process.env.P21_SQL_TRUST_CERT === 'true' },
+      // Epicor's replica presents a self-signed certificate (since Aug 2026),
+      // so the cert is trusted by DEFAULT — strict validation would fail every
+      // connection. Set P21_SQL_TRUST_CERT=false to opt back into validation.
+      // Traffic is TLS-encrypted either way.
+      options: { encrypt: true, trustServerCertificate: process.env.P21_SQL_TRUST_CERT !== 'false' },
       connectionTimeout: 30000,
       requestTimeout: 120000,
       pool: { max: 4, min: 0, idleTimeoutMillis: 30000 },

@@ -36,7 +36,9 @@ try {
     const t = line.trim()
     if (!t || t.startsWith('#') || !t.includes('=')) continue
     const k = t.slice(0, t.indexOf('=')).trim()
-    const v = t.slice(t.indexOf('=') + 1).trim()
+    // Tolerate quoted values ("true" / 'true') — a hand-edited .env shouldn't
+    // silently break a strict string comparison.
+    const v = t.slice(t.indexOf('=') + 1).trim().replace(/^(['"])(.*)\1$/, '$2')
     if (!(k in process.env)) process.env[k] = v
   }
 } catch { /* no .env file — rely on process env */ }
@@ -105,10 +107,11 @@ async function getPool() {
       database: env.P21_SQL_DATABASE,
       user: env.P21_SQL_USERNAME,
       password: env.P21_SQL_PASSWORD,
-      // P21_SQL_TRUST_CERT=true accepts the replica's certificate without CA
-      // validation (Epicor began presenting a self-signed cert in Aug 2026,
-      // which broke every sync). Traffic is still TLS-encrypted either way.
-      options: { encrypt: true, trustServerCertificate: env.P21_SQL_TRUST_CERT === 'true' },
+      // Epicor's replica presents a self-signed certificate (since Aug 2026),
+      // so the cert is trusted by DEFAULT — strict validation would fail every
+      // connection. Set P21_SQL_TRUST_CERT=false to opt back into validation
+      // if Epicor ever ships a real chain. Traffic is TLS-encrypted either way.
+      options: { encrypt: true, trustServerCertificate: env.P21_SQL_TRUST_CERT !== 'false' },
       connectionTimeout: 30000,
       requestTimeout: 120000,
       pool: { max: 2, min: 0, idleTimeoutMillis: 30000 },
@@ -320,6 +323,11 @@ if (!mode) {
   console.error('Usage: node sync-worker.mjs --once | --watch')
   process.exit(1)
 }
+
+// Version banner — confirms which build of this file a task is actually
+// running (the Aug-2026 TLS breakage was prolonged by a restart that didn't
+// take; this line in the task log settles it instantly).
+console.log(`sync-worker 2026-08-18 (supplier directory + default cert trust) — trustServerCertificate=${env.P21_SQL_TRUST_CERT !== 'false'}`)
 
 if (mode === 'once') {
   const result = await syncAndRecord('worker-scheduled')
