@@ -2,6 +2,11 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-08-18
+
+- **Price Update Processor — P21 sync broken by Epicor cert change (fixed):** the replica began presenting a self-signed TLS certificate (~Aug 13), failing every worker sync since (`self-signed certificate` in worker_last_result; mirror stale since 8/12). New `P21_SQL_TRUST_CERT=true` env accepts it (traffic still encrypted) in both the worker and `lib/p21sql.js`. **Copy `worker/sync-worker.mjs` to the office server, add `P21_SQL_TRUST_CERT=true` to `worker/.env` (and Vercel env), restart the watcher task.** Verified against the live replica.
+- **Price Update Processor — "+ New vendor" from the batch screen:** the batch detail vendor assign/change dropdown now has a "+ New vendor…" option (opens the vendor modal, then assigns the created vendor to the batch — queuing its scoped sync + re-running matching as usual). Previously an email batch from an unknown vendor forced a detour through the Vendors page.
+
 ## 2026-08-12
 
 - **Price Update Processor — Phase 7 (polish):** Vendors page is now full CRUD — notes field, per-vendor **parse-profile management** (fingerprint badge showing on-arrival auto-parse eligibility, profile delete for cleaning up stale pre-fingerprint recipes), vendor delete when batch-free (deactivate otherwise), profile/batch counts in the list. Settings guardrail thresholds are editable (apply at the next matching run). Success **toasts** on approve/export/mark-applied/archive (new shared `Toast` component). No migration.

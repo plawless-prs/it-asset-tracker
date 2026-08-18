@@ -12,6 +12,7 @@ import {
 } from '../../../../lib/priceupdates'
 import { fetchParsedSheets, applyParse, triggerMatch, generateExport, uploadBatchFiles } from '../../../../lib/priceupdatesParse'
 import { useToasts, Toasts } from '../../../../components/Toast'
+import VendorModal from '../../../../components/VendorModal'
 
 const SPREADSHEET = /\.(xlsx|xls|csv)$/i
 const PAGE_SIZE = 100
@@ -437,6 +438,7 @@ export default function BatchDetail() {
   // Changing the vendor queues a scoped mirror sync and re-runs matching so
   // lines resolve against the right supplier.
   const [vendorEdit, setVendorEdit] = useState(false)
+  const [newVendorOpen, setNewVendorOpen] = useState(false)
   const [allVendors, setAllVendors] = useState([])
   const [savingVendor, setSavingVendor] = useState(false)
   async function openVendorEdit() {
@@ -446,10 +448,12 @@ export default function BatchDetail() {
     }
     setVendorEdit(true)
   }
-  async function changeVendor(newId) {
+  // `vendorObj` covers a vendor created moments ago via "+ New vendor" that
+  // isn't in the allVendors state yet.
+  async function changeVendor(newId, vendorObj) {
     setSavingVendor(true); setError(''); setNotice('')
     try {
-      const newVendor = allVendors.find(v => v.id === newId) || null
+      const newVendor = vendorObj || allVendors.find(v => v.id === newId) || null
       const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ')
       const activity = `[${stamp}] Vendor ${newVendor ? `set to ${newVendor.name}` : 'cleared'} by ${user?.email || 'unknown'}.`
       const { error: e } = await supabase.from('pu_batches')
@@ -859,7 +863,10 @@ export default function BatchDetail() {
                     autoFocus
                     defaultValue={batch.vendor?.id || ''}
                     disabled={savingVendor}
-                    onChange={(e) => changeVendor(e.target.value)}
+                    onChange={(e) => {
+                      if (e.target.value === '__new__') { setVendorEdit(false); setNewVendorOpen(true) }
+                      else changeVendor(e.target.value)
+                    }}
                     style={{
                       flex: 1, padding: '6px 8px', backgroundColor: '#131a24', border: '1px solid #1e2d40',
                       borderRadius: '7px', color: '#c0cad8', fontSize: '12px', outline: 'none',
@@ -867,6 +874,7 @@ export default function BatchDetail() {
                   >
                     <option value="">Unidentified</option>
                     {allVendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                    <option value="__new__">+ New vendor…</option>
                   </select>
                   <button onClick={() => setVendorEdit(false)} disabled={savingVendor} style={{ background: 'none', border: 'none', color: '#5a6e84', fontSize: '12px', cursor: 'pointer' }}>✕</button>
                 </div>
@@ -1038,6 +1046,20 @@ export default function BatchDetail() {
           )}
         </div>
       </div>
+
+      {newVendorOpen && (
+        <VendorModal
+          vendor={null}
+          onClose={() => setNewVendorOpen(false)}
+          onSaved={(created) => {
+            setNewVendorOpen(false)
+            if (created?.id) {
+              setAllVendors(prev => [...prev.filter(v => v.id !== created.id), created].sort((a, b) => a.name.localeCompare(b.name)))
+              changeVendor(created.id, created)
+            }
+          }}
+        />
+      )}
 
       {searchLine && (
         <ItemSearchModal

@@ -63,6 +63,9 @@ P21_SQL_PORT=1433
 P21_SQL_DATABASE=
 P21_SQL_USERNAME=
 P21_SQL_PASSWORD=
+# Epicor's replica presents a self-signed TLS certificate (since Aug 2026) —
+# this accepts it without CA validation; traffic is still encrypted.
+P21_SQL_TRUST_CERT=true
 
 # Supabase (service role — worker writes bypass RLS)
 SUPABASE_URL=

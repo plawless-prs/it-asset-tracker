@@ -63,10 +63,12 @@ export default function VendorModal({ vendor, onClose, onSaved }) {
     const q = editing
       ? supabase.from('pu_vendors').update(payload).eq('id', vendor.id)
       : supabase.from('pu_vendors').insert(payload)
-    const { error: e } = await q
+    const { data, error: e } = await q.select('id, name, p21_supplier_id').single()
     setSaving(false)
     if (e) { setError(e.message); return }
-    onSaved?.()
+    // The saved row is passed along so callers (e.g. the batch screen's
+    // "+ New vendor") can immediately assign the vendor they just created.
+    onSaved?.(data)
   }
 
   // Deleting a profile: pu_batch_files.parse_profile_id has no ON DELETE

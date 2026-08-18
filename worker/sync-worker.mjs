@@ -19,8 +19,9 @@
 // Config comes from worker/.env (KEY=VALUE lines; see README.md). Required:
 //   P21_SQL_HOST, P21_SQL_DATABASE, P21_SQL_USERNAME, P21_SQL_PASSWORD,
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-// Optional: P21_SQL_PORT (1433), POLL_SECONDS (60), plus the same
-// P21_SUPPLIER_VIEW / P21_ITEM_VIEW / P21_F_* overrides the app supports.
+// Optional: P21_SQL_PORT (1433), POLL_SECONDS (60), P21_SQL_TRUST_CERT
+// (set to true to accept the replica's self-signed certificate), plus the
+// same P21_SUPPLIER_VIEW / P21_ITEM_VIEW / P21_F_* overrides the app supports.
 
 import { readFileSync } from 'fs'
 import { dirname, join } from 'path'
@@ -101,7 +102,10 @@ async function getPool() {
       database: env.P21_SQL_DATABASE,
       user: env.P21_SQL_USERNAME,
       password: env.P21_SQL_PASSWORD,
-      options: { encrypt: true, trustServerCertificate: false },
+      // P21_SQL_TRUST_CERT=true accepts the replica's certificate without CA
+      // validation (Epicor began presenting a self-signed cert in Aug 2026,
+      // which broke every sync). Traffic is still TLS-encrypted either way.
+      options: { encrypt: true, trustServerCertificate: env.P21_SQL_TRUST_CERT === 'true' },
       connectionTimeout: 30000,
       requestTimeout: 120000,
       pool: { max: 2, min: 0, idleTimeoutMillis: 30000 },
