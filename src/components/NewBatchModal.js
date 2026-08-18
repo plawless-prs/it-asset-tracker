@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createClient } from '../lib/supabase'
 import { uploadBatchFiles } from '../lib/priceupdatesParse'
+import SupplierLookup from './SupplierLookup'
 
 // New price-update batch: pick or create a vendor, drag-drop one or more files.
 // Creates a `pu_batches` row (source 'upload', status 'received'), uploads the
@@ -15,6 +16,7 @@ export default function NewBatchModal({ onClose, onCreated, defaultEffectiveDate
   const [vendors, setVendors] = useState([])
   const [vendorId, setVendorId] = useState('')
   const [newVendorName, setNewVendorName] = useState('')
+  const [newVendorSupplierId, setNewVendorSupplierId] = useState('')
   const [creatingVendor, setCreatingVendor] = useState(false)
   const [effectiveDate, setEffectiveDate] = useState(defaultEffectiveDate || '')
   const [files, setFiles] = useState([])
@@ -59,7 +61,10 @@ export default function NewBatchModal({ onClose, onCreated, defaultEffectiveDate
       if (creatingVendor) {
         const { data: v, error: vErr } = await supabase
           .from('pu_vendors')
-          .insert({ name: newVendorName.trim() })
+          .insert({
+            name: newVendorName.trim(),
+            p21_supplier_id: newVendorSupplierId.trim() || null,
+          })
           .select('id')
           .single()
         if (vErr) throw vErr
@@ -92,7 +97,8 @@ export default function NewBatchModal({ onClose, onCreated, defaultEffectiveDate
       // 4. Queue a supplier-scoped mirror sync so matching sees fresh P21 data
       // by the time the reviewer gets there. Best-effort: the nightly full
       // sync is the backstop, so a failure here must not block the batch.
-      const supplierId = vendors.find(v => v.id === resolvedVendorId)?.p21_supplier_id
+      const supplierId = vendors.find(v => v.id === resolvedVendorId)?.p21_supplier_id ||
+        (creatingVendor ? newVendorSupplierId.trim() : null)
       if (supplierId) {
         try {
           const { data: { user } } = await supabase.auth.getUser()
@@ -168,9 +174,19 @@ export default function NewBatchModal({ onClose, onCreated, defaultEffectiveDate
                 placeholder="Vendor name"
                 autoFocus
               />
+              <div style={{ marginTop: '8px' }}>
+                <SupplierLookup
+                  value={newVendorSupplierId}
+                  inputStyle={inputStyle}
+                  onChange={(id, row) => {
+                    setNewVendorSupplierId(id)
+                    if (row?.supplier_name && !newVendorName.trim()) setNewVendorName(row.supplier_name)
+                  }}
+                />
+              </div>
               <button
                 type="button"
-                onClick={() => { setCreatingVendor(false); setNewVendorName('') }}
+                onClick={() => { setCreatingVendor(false); setNewVendorName(''); setNewVendorSupplierId('') }}
                 style={{
                   marginTop: '8px', background: 'none', border: 'none', padding: 0,
                   color: '#8aa0b8', fontSize: '12.5px', cursor: 'pointer',

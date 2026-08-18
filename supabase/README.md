@@ -19,6 +19,12 @@ Run them **in order** the first time:
 | 11 | `11_priceupdates_matching.sql` | Price Update Processor Phase 3: `pu_vendors.p21_item_prefix` + the `pu_apply_matches(jsonb)` bulk line-update function used by the matching route. |
 | 12 | `12_priceupdates_rls_perf.sql` | Recreates the `pu_*` + `p21_item_mirror` RLS policies with `(select has_app_access(...))` so the check is an init-plan (once per query) instead of per-row — fixes intermittent 500s on large-batch count queries. |
 | 13 | `13_priceupdates_match_memory.sql` | `pu_item_aliases` (per-vendor vendor-part → P21-item match memory, written on approve/manual fix, checked first by the match route). |
+| 14 | `14_p21_sync_worker.sql` | `pu_settings` worker columns (`worker_heartbeat_at`/`worker_last_result` + the since-dropped `sync_requested_at`) for the on-prem sync worker. |
+| 15 | `15_pu_sync_requests.sql` | `pu_sync_requests` queue (supplier-scoped syncs on batch creation; Settings "Sync now" goes through it too); drops migration-14's single-flag columns. |
+| 16 | `16_pu_library_files.sql` | `pu_library_files` (file-library metadata; objects live under `library/<vendor>/<year>/…` in `price-files`). |
+| 17 | `17_pu_library_facets.sql` | `pu_library_facets(vendor, year)` SQL function feeding the Files page's year/date dropdowns. |
+| 18 | `18_pu_reminders.sql` | `pu_settings.reminder_emails` (daily batch-reminder digest recipients). |
+| 19 | `19_p21_supplier_mirror.sql` | `p21_supplier_mirror` (read-only P21 supplier directory, synced by the worker on full syncs; powers the vendor modal's supplier lookup). |
 
 ## Notes
 

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '../lib/supabase'
 import { formatDate } from '../lib/priceupdates'
+import SupplierLookup from './SupplierLookup'
 
 // Vendor add/edit for the Price Update Processor (full CRUD as of Phase 7).
 // Covers the fields matching needs (P21 supplier id + item prefix), name /
@@ -125,8 +126,17 @@ export default function VendorModal({ vendor, onClose, onSaved }) {
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
           <div>
-            <label style={labelStyle}>P21 supplier ID</label>
-            <input style={inputStyle} value={form.p21_supplier_id} onChange={e => set('p21_supplier_id', e.target.value)} placeholder="e.g. 10638" />
+            <label style={labelStyle}>P21 supplier</label>
+            <SupplierLookup
+              value={form.p21_supplier_id}
+              inputStyle={inputStyle}
+              onChange={(id, row) => {
+                set('p21_supplier_id', id)
+                // Creating a vendor straight from a supplier pick: use the
+                // P21 name as the starting vendor name if none typed yet.
+                if (row?.supplier_name && !form.name.trim()) set('name', row.supplier_name)
+              }}
+            />
           </div>
           <div>
             <label style={labelStyle}>P21 item prefix</label>

@@ -56,6 +56,9 @@ if (!SUPABASE_URL || !SERVICE_KEY) {
 
 const SUPPLIER_VIEW = env.P21_SUPPLIER_VIEW || 'p21_view_inventory_supplier'
 const ITEM_VIEW     = env.P21_ITEM_VIEW     || 'p21_view_inv_mast'
+// Supplier master (directory of all suppliers, id + name) — mirrored into
+// Supabase's p21_supplier_mirror on full syncs for the vendor lookup UI.
+const SUPPLIER_MASTER_VIEW = env.P21_SUPPLIER_MASTER_VIEW || 'p21_view_supplier'
 const F = {
   supplier_id:      env.P21_F_SUPPLIER_ID      || 'supplier_id',
   item_id:          env.P21_F_ITEM_ID          || 'item_id',
@@ -169,6 +172,40 @@ async function upsertMirror(rows) {
   return deduped.length
 }
 
+// Mirror the P21 supplier directory (id + name, ~5k rows) into
+// p21_supplier_mirror. Runs on full syncs only — it changes rarely and the
+// scoped batch-created path should stay seconds-fast.
+async function syncSupplierDirectory(startedAt) {
+  const view = sqlIdent(SUPPLIER_MASTER_VIEW)
+  const pool = await getPool()
+  let total = 0
+  for (let off = 0; ; off += SQL_PAGE) {
+    const req = pool.request()
+    req.input('off', off); req.input('page', SQL_PAGE)
+    const rows = (await req.query(`
+      SELECT supplier_id, supplier_name FROM dbo.${view}
+      WHERE delete_flag = 'N'
+      ORDER BY supplier_id
+      OFFSET @off ROWS FETCH NEXT @page ROWS ONLY`)).recordset || []
+    if (rows.length === 0) break
+    const mapped = rows
+      .filter(r => r.supplier_id != null)
+      .map(r => ({
+        supplier_id: String(r.supplier_id).trim(),
+        supplier_name: r.supplier_name != null ? String(r.supplier_name).trim() : null,
+        last_synced_at: startedAt,
+      }))
+    for (let i = 0; i < mapped.length; i += UPSERT_CHUNK) {
+      await sb('POST', 'p21_supplier_mirror?on_conflict=supplier_id',
+        mapped.slice(i, i + UPSERT_CHUNK),
+        { Prefer: 'resolution=merge-duplicates,return=minimal' })
+    }
+    total += mapped.length
+    if (rows.length < SQL_PAGE) break
+  }
+  return total
+}
+
 // scope: null/undefined = all tracked suppliers; or an array of supplier ids.
 async function runSync(via, scope = null) {
   const startedAt = new Date().toISOString()
@@ -206,7 +243,21 @@ async function runSync(via, scope = null) {
     console.log(`  supplier ${sid}: ${n.toLocaleString()} rows`)
   }
 
-  const result = { ok: true, via, upserted, suppliers: perSupplier, started_at: startedAt, finished_at: new Date().toISOString() }
+  // Full syncs also refresh the supplier directory (vendor-lookup UI).
+  // Best-effort: a directory failure must not fail the item sync. Missing-
+  // table errors (migration 19 not run yet) are expected until it's applied.
+  let supplierDirectory
+  if (!scope) {
+    try {
+      supplierDirectory = await syncSupplierDirectory(startedAt)
+      console.log(`  supplier directory: ${supplierDirectory.toLocaleString()} rows`)
+    } catch (e) {
+      supplierDirectory = `failed: ${String(e?.message || e).slice(0, 160)}`
+      console.error(`  supplier directory sync failed: ${String(e?.message || e)}`)
+    }
+  }
+
+  const result = { ok: true, via, upserted, suppliers: perSupplier, supplier_directory: supplierDirectory, started_at: startedAt, finished_at: new Date().toISOString() }
   console.log(`[${result.finished_at}] sync done — ${upserted.toLocaleString()} rows`)
   return result
 }
