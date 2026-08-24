@@ -45,6 +45,7 @@ export default function Navigation() {
       basePath: '/invoices',
       links: [
         { href: '/invoices', label: 'Process Invoices' },
+        { href: '/invoices/ad', label: 'AD Invoices' },
       ],
     },
     {

@@ -2,6 +2,10 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-08-24
+
+- **Invoice Processor — new "AD Invoices" utility (`/invoices/ad`):** batch-fixes P21's AD invoice `.txt` exports entirely in the browser — pick AD Industrial (`PO30`) or AD Bearings (`PO33`), drop the files, and each is renamed (everything through the `!` stripped from `<digits>@!<digits>.txt`) with its leading 5-digit invoice number replaced by the PO code; preview table flags anything that doesn't match the expected shape. Save-to-folder (File System Access API) + `.zip` fallback (new `jszip` dep). Registered in the Invoice Processor nav dropdown.
+
 ## 2026-08-18
 
 - **Price Update Processor — P21 supplier lookup (migration `19`):** new `p21_supplier_mirror` table mirrors the replica's supplier directory (~5.3k id+name rows from `p21_view_supplier`, refreshed on the worker's full syncs). Vendor creation/editing (`VendorModal` and the New Batch modal's inline new-vendor) gets a `SupplierLookup` typeahead — pick the P21 supplier by name and the id fills in (green check when the id resolves; manual entry still works). **Run `19_p21_supplier_mirror.sql` and update `sync-worker.mjs` on the office server.** Also backfilled `supabase/README.md`'s migration table (14–19).

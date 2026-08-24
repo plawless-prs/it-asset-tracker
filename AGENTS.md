@@ -27,7 +27,7 @@ Record **notable** changes (new features, schema/infra changes, behavior changes
 
 ## The apps
 
-Each app is gated per-user. Current apps: **IT Tracker** (`tracker`), **Material Calculator** (`calculator`), **Help Desk** (`helpdesk`), **Price Update Processor** (`priceupdates`, being built in phases — see `price-update-processor/build-spec.md`), **Daily Ops** (`dailyops`, planned). The **Invoice Processor** (`invoices`) is being retired (see `docs/deprecation-checklist.md`).
+Each app is gated per-user. Current apps: **IT Tracker** (`tracker`), **Material Calculator** (`calculator`), **Help Desk** (`helpdesk`), **Price Update Processor** (`priceupdates`, being built in phases — see `price-update-processor/build-spec.md`), **Daily Ops** (`dailyops`, planned). The **Invoice Processor** (`invoices`) is being retired (see `docs/deprecation-checklist.md`) — **except** `/invoices/ad` ("AD Invoices"), a small Porter-only client-side utility added 2026-08: batch-renames P21 AD invoice `.txt` exports (strips everything through the `!` in `<digits>@!<digits>.txt`) and swaps the leading 5-digit invoice number after the 3-letter vendor abbreviation for the batch's PO code (AD Industrial → `PO30`, AD Bearings → `PO33`); saves via the File System Access API with a JSZip download fallback, nothing uploaded. Keep it when the rest of the app goes.
 
 ## Auth, roles & per-app access (important, easy to get wrong)
 
