@@ -44,8 +44,11 @@ function transformContent(content, code) {
   if (!m || m.index > HEAD_WINDOW) {
     return { contentOk: false, contentReason: 'no "ABC 12345"-style pattern near the start of the file' }
   }
+  // The PO code is padded to the same width as the 5 digits it replaces
+  // ("PO30" + one space) — the file is fixed-width, so every character
+  // position after the swap must stay where it was.
   const before = `${m[1]}${m[2]}${m[3]}`
-  const after = `${m[1]}${m[2]}${code}`
+  const after = `${m[1]}${m[2]}${code} `
   const newContent = content.slice(0, m.index) + after + content.slice(m.index + m[0].length)
   return { newContent, before, after, contentOk: true }
 }
