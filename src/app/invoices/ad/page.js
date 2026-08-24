@@ -224,7 +224,14 @@ export default function AdInvoices() {
                     </td>
                     <td style={{ padding: '9px 14px', fontFamily: 'monospace', fontSize: '12px' }}>
                       {r.contentOk
-                        ? <><span style={{ color: '#8aa0b8' }}>{r.before}</span><span style={{ color: '#5a6e84' }}> → </span><span style={{ color: '#4ade80' }}>{r.after}</span></>
+                        ? <>
+                            <span style={{ color: '#8aa0b8' }}>{r.before}</span>
+                            <span style={{ color: '#5a6e84' }}> → </span>
+                            <span style={{ color: '#4ade80' }}>{r.after.trimEnd()}</span>
+                            {r.after.endsWith(' ') && (
+                              <span title="trailing space — keeps the field the same width as the 5 digits" style={{ color: '#3f6f52', cursor: 'help' }}>␣</span>
+                            )}
+                          </>
                         : <span style={{ color: '#f87171' }}>—</span>}
                     </td>
                     <td style={{ padding: '9px 14px' }}>
