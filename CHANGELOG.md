@@ -2,6 +2,10 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-08-27
+
+- **Price Update Processor — bulk include/exclude across the whole tab:** the review grid's select-all only covered the visible 100-row page. Checking the header box now offers "Select all N" for the current tab (Gmail-style); in that mode Include/Exclude runs as a single filtered server-side update — nothing extra loads, so a 10k-line tab is one round trip. Touching any individual checkbox drops back to page-level selection.
+
 ## 2026-08-24
 
 - **Invoice Processor — new "AD Invoices" utility (`/invoices/ad`):** batch-fixes P21's AD invoice `.txt` exports entirely in the browser — pick AD Industrial (`PO30`) or AD Bearings (`PO33`), drop the files, and each is renamed (everything through the `!` stripped from `<digits>@!<digits>.txt`) with its leading 5-digit invoice number replaced by the PO code; preview table flags anything that doesn't match the expected shape. Save-to-folder (File System Access API) + `.zip` fallback (new `jszip` dep). Registered in the Invoice Processor nav dropdown.

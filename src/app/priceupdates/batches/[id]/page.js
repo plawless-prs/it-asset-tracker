@@ -62,6 +62,11 @@ export default function BatchDetail() {
   const [counts, setCounts] = useState({ all: 0, flagged: 0, ambiguous: 0, unmatched: 0, excluded: 0, ambiguousUnpicked: 0 })
 
   const [selected, setSelected] = useState(() => new Set())
+  // "Every line in the current tab" selection (spans all pages). Bulk actions
+  // in this mode run one filtered server-side UPDATE — the lines themselves
+  // are never loaded. Any manual checkbox interaction drops back to
+  // page-level selection.
+  const [selectAllTab, setSelectAllTab] = useState(false)
   const [editing, setEditing] = useState(null)          // { lineId, field, value }
   const [searchLine, setSearchLine] = useState(null)    // line being item-searched
   const [busyFile, setBusyFile] = useState(null)
@@ -162,7 +167,7 @@ export default function BatchDetail() {
   useEffect(() => { loadLines(tab, page) }, [id, tab, page])     // eslint-disable-line react-hooks/exhaustive-deps
 
   function switchTab(t) {
-    setTab(t); setPage(0); setSelected(new Set()); setEditing(null)
+    setTab(t); setPage(0); setSelected(new Set()); setSelectAllTab(false); setEditing(null)
   }
 
   // Keep the batch's stored matched/flagged counts in sync after edits so the
@@ -220,9 +225,20 @@ export default function BatchDetail() {
     const { error: e } = await supabase.from('pu_lines').update({ include }).in('id', ids)
     if (e) return setError(`Update failed: ${e.message}`)
     setLines(ls => ls.map(l => (ids.includes(l.id) ? { ...l, include } : l)))
-    setSelected(new Set())
+    setSelected(new Set()); setSelectAllTab(false)
     loadCounts()
     if (tab === 'excluded') loadLines()   // rows leave this view when re-included
+  }
+
+  // Include/exclude EVERY line the current tab covers — one server-side
+  // UPDATE using the same filter the tab's queries use, so a 10k-line tab is
+  // one round trip and nothing gets loaded.
+  async function setIncludeTab(include) {
+    const { error: e } = await tabFilter(
+      supabase.from('pu_lines').update({ include }).eq('batch_id', id), tab)
+    if (e) return setError(`Update failed: ${e.message}`)
+    setSelected(new Set()); setSelectAllTab(false)
+    loadCounts(); loadLines()
   }
 
   // Remember (or forget) a manual resolution in pu_item_aliases so the next
@@ -337,7 +353,7 @@ export default function BatchDetail() {
       }).eq('id', id)
       if (e) throw e
       toast(`Approved — ${included} lines ready for export${confirmedBit ? ` (${confirmed} auto-picks confirmed & remembered)` : ''}.`)
-      setSelected(new Set()); setEditing(null)
+      setSelected(new Set()); setSelectAllTab(false); setEditing(null)
       await loadBatch(); await loadCounts(); await loadLines()
     } catch (e) {
       setError(`Approve failed: ${e.message}`)
@@ -677,11 +693,23 @@ export default function BatchDetail() {
                 )
               })}
             </div>
-            {editable && selected.size > 0 && (
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <span style={{ fontSize: '12px', color: '#8aa0b8' }}>{selected.size} selected</span>
-                <button onClick={() => setInclude([...selected], true)} style={miniBtn('#0d3320', '#4ade80')}>Include</button>
-                <button onClick={() => setInclude([...selected], false)} style={miniBtn('#330d0d', '#f87171')}>Exclude</button>
+            {editable && (selected.size > 0 || selectAllTab) && (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '12px', color: selectAllTab ? '#7fb4f5' : '#8aa0b8' }}>
+                  {selectAllTab
+                    ? `All ${(counts[tab] ?? 0).toLocaleString()} in ${TABS.find(t => t.key === tab)?.label || 'this tab'} selected`
+                    : `${selected.size} selected`}
+                </span>
+                {!selectAllTab && allOnPageSelected && (counts[tab] ?? 0) > lines.length && (
+                  <button onClick={() => setSelectAllTab(true)} style={{
+                    background: 'none', border: 'none', padding: 0, color: '#60a5fa',
+                    fontSize: '12px', fontWeight: '600', cursor: 'pointer',
+                  }}>
+                    Select all {(counts[tab] ?? 0).toLocaleString()}
+                  </button>
+                )}
+                <button onClick={() => selectAllTab ? setIncludeTab(true) : setInclude([...selected], true)} style={miniBtn('#0d3320', '#4ade80')}>Include</button>
+                <button onClick={() => selectAllTab ? setIncludeTab(false) : setInclude([...selected], false)} style={miniBtn('#330d0d', '#f87171')}>Exclude</button>
               </div>
             )}
           </div>
@@ -692,7 +720,8 @@ export default function BatchDetail() {
               <div style={{ display: 'grid', gridTemplateColumns: LINE_GRID, gap: '8px', padding: '8px 14px', borderBottom: '1px solid #182030', fontSize: '10.5px', color: '#5a6e84', textTransform: 'uppercase', letterSpacing: '0.05em', alignItems: 'center', flexShrink: 0 }}>
                 <div>
                   {editable && (
-                    <input type="checkbox" checked={allOnPageSelected} onChange={() => {
+                    <input type="checkbox" checked={selectAllTab || allOnPageSelected} onChange={() => {
+                      if (selectAllTab) { setSelectAllTab(false); setSelected(new Set()); return }
                       setSelected(s => {
                         const n = new Set(s)
                         if (allOnPageSelected) lines.forEach(l => n.delete(l.id))
@@ -727,11 +756,18 @@ export default function BatchDetail() {
                     <div key={l.id} style={{
                       display: 'grid', gridTemplateColumns: LINE_GRID, gap: '8px', padding: '6px 14px',
                       borderBottom: '1px solid #131c28', alignItems: 'center', fontSize: '12.5px',
-                      opacity: dim ? 0.45 : 1, backgroundColor: selected.has(l.id) ? '#131e2d' : 'transparent',
+                      opacity: dim ? 0.45 : 1, backgroundColor: (selectAllTab || selected.has(l.id)) ? '#131e2d' : 'transparent',
                     }}>
                       <div>
                         {editable && (
-                          <input type="checkbox" checked={selected.has(l.id)} onChange={() => {
+                          <input type="checkbox" checked={selectAllTab || selected.has(l.id)} onChange={() => {
+                            // Touching a single row cancels tab-wide selection
+                            // (drops to this page minus the toggled row).
+                            if (selectAllTab) {
+                              setSelectAllTab(false)
+                              setSelected(new Set(lines.filter(x => x.id !== l.id).map(x => x.id)))
+                              return
+                            }
                             setSelected(s => {
                               const n = new Set(s)
                               if (n.has(l.id)) n.delete(l.id)
