@@ -10,7 +10,7 @@ import {
   formatCurrency, formatDate, formatPct, relativeTime,
   costChangePct, computeFlag, normalizePart,
 } from '../../../../lib/priceupdates'
-import { fetchParsedSheets, applyParse, triggerMatch, generateExport, uploadBatchFiles } from '../../../../lib/priceupdatesParse'
+import { fetchParsedSheets, applyParse, triggerMatch, generateExport, uploadBatchFiles, createBatchFromFiles } from '../../../../lib/priceupdatesParse'
 import { useToasts, Toasts } from '../../../../components/Toast'
 import VendorModal from '../../../../components/VendorModal'
 
@@ -90,7 +90,7 @@ export default function BatchDetail() {
     setBatch(b)
     const { data: f } = await supabase
       .from('pu_batch_files')
-      .select('id, file_name, file_size, storage_path, parse_status, parsed_rows, parse_profile_id, error, created_at')
+      .select('id, file_name, file_size, mime_type, storage_path, parse_status, parsed_rows, parse_profile_id, error, created_at')
       .eq('batch_id', id).order('created_at')
     setFiles(f || [])
     const { data: ex } = await supabase
@@ -410,6 +410,32 @@ export default function BatchDetail() {
       setError(`Update failed: ${e.message}`)
     } finally {
       setApplying(false)
+    }
+  }
+
+  // Re-create a finished batch to redo it (e.g. a wrong price column found
+  // after export): a NEW batch gets copies of this batch's files plus the
+  // same vendor + effective date; both sides get a cross-referencing activity
+  // note. This batch stays untouched — the new one starts at `received` with
+  // nothing parsed, so the mapping can be fixed cleanly.
+  const [recreating, setRecreating] = useState(false)
+  async function recreateBatch() {
+    if (!window.confirm(`Re-create batch #${batch.number}? A new batch will get copies of its ${files.length} file${files.length === 1 ? '' : 's'} and the same vendor/effective date — this batch stays unchanged.`)) return
+    setRecreating(true); setError('')
+    try {
+      const { batch: nb } = await createBatchFromFiles(supabase, {
+        vendorId: batch.vendor?.id || null,
+        supplierId: batch.vendor?.p21_supplier_id || null,
+        effectiveDate: batch.effective_date || null,
+        sources: files,
+        note: `Re-created from batch #${batch.number}.`,
+        userId: user?.id,
+      })
+      await supabase.from('pu_batches').update(withActivity({}, `Re-created as batch #${nb.number}.`)).eq('id', id)
+      router.push(`/priceupdates/batches/${nb.id}`)
+    } catch (e) {
+      setError(`Re-create failed: ${e.message}`)
+      setRecreating(false)
     }
   }
 
@@ -874,6 +900,14 @@ export default function BatchDetail() {
                 backgroundColor: '#131a24', color: '#8aa0b8', border: '1px solid #1e2d40', cursor: 'pointer',
               }}>Archive batch</button>
             </>
+          )}
+          {/* Redo path for locked batches — a fresh batch from the same files. */}
+          {['approved', 'exported', 'applied', 'archived'].includes(batch.status) && files.length > 0 && (
+            <button onClick={recreateBatch} disabled={recreating} style={{
+              padding: '9px', borderRadius: '10px', fontSize: '12.5px', fontWeight: '600',
+              backgroundColor: '#131a24', color: recreating ? '#5a6e84' : '#7fb4f5',
+              border: '1px solid #1e3a5f', cursor: recreating ? 'not-allowed' : 'pointer',
+            }}>{recreating ? 'Re-creating…' : '⎘ Re-create batch (redo)'}</button>
           )}
 
           {/* Properties */}

@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { createClient } from '../../../lib/supabase'
 import { formatDate, formatBytes, slugify as slug, sanitizeFileName as sanitize } from '../../../lib/priceupdates'
+import { createBatchFromFiles } from '../../../lib/priceupdatesParse'
 
 // Phase 5.5: the price-file library. Historical vendor price files (bulk-
 // imported via scripts/import-price-library.mjs) plus new in-app uploads,
@@ -14,6 +16,7 @@ const PAGE_SIZE = 50
 
 export default function PriceUpdatesFiles() {
   const supabase = createClient()
+  const router = useRouter()
   const [files, setFiles] = useState([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -88,6 +91,34 @@ export default function PriceUpdatesFiles() {
       .from('price-files').createSignedUrl(f.storage_path, 60, { download: f.file_name })
     if (e) { setError(e.message); return }
     window.open(data.signedUrl, '_blank')
+  }
+
+  // Start a fresh batch from an archived file — the "redo a price update"
+  // path when the original batch is long gone or was done wrong. The library
+  // copy stays where it is; the new batch gets its own copy of the object.
+  const [creatingBatch, setCreatingBatch] = useState(null)
+  async function createBatchFrom(f) {
+    if (!window.confirm(`Create a new batch from "${f.file_name}"${f.vendor ? ` for ${f.vendor.name}` : ''}?`)) return
+    setCreatingBatch(f.id); setError(''); setNotice('')
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      let supplierId = null
+      if (f.vendor?.id) {
+        const { data: v } = await supabase.from('pu_vendors').select('p21_supplier_id').eq('id', f.vendor.id).single()
+        supplierId = v?.p21_supplier_id || null
+      }
+      const { batch } = await createBatchFromFiles(supabase, {
+        vendorId: f.vendor?.id || null,
+        supplierId,
+        sources: [f],
+        note: `Created from library file "${f.file_name}"${f.batch ? ` (originally batch #${f.batch.number})` : ''}.`,
+        userId: user?.id,
+      })
+      router.push(`/priceupdates/batches/${batch.id}`)
+    } catch (e) {
+      setError(`Batch creation failed: ${e.message}`)
+      setCreatingBatch(null)
+    }
   }
 
   async function removeFile(f) {
@@ -209,6 +240,9 @@ export default function PriceUpdatesFiles() {
                   </td>
                   <td style={{ ...tdStyle, whiteSpace: 'nowrap', textAlign: 'right' }}>
                     <button style={actionBtn} onClick={() => download(f)}>Download</button>
+                    <button style={actionBtn} disabled={creatingBatch === f.id} onClick={() => createBatchFrom(f)}>
+                      {creatingBatch === f.id ? 'Creating…' : 'New batch'}
+                    </button>
                     <button style={actionBtn} onClick={() => setEditFile(f)}>Edit</button>
                     <button style={actionBtn} onClick={() => setLinkFile(f)}>{f.batch ? 'Re-link' : 'Link batch'}</button>
                     <button style={{ ...actionBtn, color: '#f87171' }} onClick={() => removeFile(f)}>Delete</button>

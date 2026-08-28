@@ -2,6 +2,10 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-08-28
+
+- **Price Update Processor — re-create a batch from its files (the redo path):** finished batches (approved/exported/applied/archived) gain a **Re-create batch** action — a fresh `received` batch gets copies of the files plus the same vendor/effective date, cross-noted both ways; the original stays untouched. The Files page gains a per-file **New batch** action doing the same from a library file. Neither auto-parses (the usual reason for a redo is a bad column mapping) and nothing re-archives to the library. Shared helper: `createBatchFromFiles()` in `lib/priceupdatesParse.js`.
+
 ## 2026-08-27
 
 - **Price Update Processor — bulk include/exclude across the whole tab:** the review grid's select-all only covered the visible 100-row page. Checking the header box now offers "Select all N" for the current tab (Gmail-style); in that mode Include/Exclude runs as a single filtered server-side update — nothing extra loads, so a 10k-line tab is one round trip. Touching any individual checkbox drops back to page-level selection.

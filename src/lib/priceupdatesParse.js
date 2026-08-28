@@ -54,6 +54,57 @@ export async function uploadBatchFiles(supabase, { batchId, vendor, effectiveDat
   return uploaded.length
 }
 
+// Create a fresh `received` batch from files ALREADY in Storage — the
+// "re-create a finished batch to fix a mistake" / "start a batch from a
+// library file" path. Copies each source object under the new batch's folder
+// and records pu_batch_files rows (PDFs marked manual, everything else
+// pending); deliberately does NOT auto-parse (the usual reason for a redo is
+// a bad mapping) and does NOT re-archive to the library (these files are
+// already there). Queues a scoped mirror sync when a supplier id is known.
+//   sources: [{ storage_path, file_name, mime_type?, file_size? }]
+// Returns { batch: {id, number}, copied }. Throws on failure.
+export async function createBatchFromFiles(supabase, { vendorId, supplierId, effectiveDate, sources, note, userId }) {
+  const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ')
+  const { data: batch, error } = await supabase.from('pu_batches')
+    .insert({
+      vendor_id: vendorId || null,
+      source: 'upload',
+      status: 'received',
+      effective_date: effectiveDate || null,
+      ...(note ? { notes: `[${stamp}] ${note}` } : {}),
+    })
+    .select('id, number').single()
+  if (error) throw error
+
+  let copied = 0
+  for (const s of sources) {
+    const dest = `${batch.id}/${Date.now()}-${sanitizeFileName(s.file_name)}`
+    const { error: cErr } = await supabase.storage.from('price-files').copy(s.storage_path, dest)
+    if (cErr) throw new Error(`Could not copy ${s.file_name}: ${cErr.message}`)
+    const { error: fErr } = await supabase.from('pu_batch_files').insert({
+      batch_id: batch.id,
+      storage_path: dest,
+      file_name: s.file_name,
+      mime_type: s.mime_type || null,
+      file_size: s.file_size || null,
+      ...(/\.pdf$/i.test(s.file_name) ? { parse_status: 'manual' } : {}),
+    })
+    if (fErr) throw fErr
+    copied++
+  }
+
+  if (supplierId) {
+    try {
+      await supabase.from('pu_sync_requests').insert({
+        supplier_id: String(supplierId).trim(),
+        reason: 'batch_created',
+        requested_by: userId || null,
+      })
+    } catch { /* sync request is best-effort */ }
+  }
+  return { batch, copied }
+}
+
 // POST the file to the server parse route -> { file, sheets:[{name,rows}], truncated }.
 // The route windows big sheets at 20k rows per response (Vercel response-size
 // cap), so this pages with `offset` until every sheet is complete — callers
