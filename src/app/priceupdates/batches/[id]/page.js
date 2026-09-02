@@ -622,6 +622,19 @@ export default function BatchDetail() {
           .delete().in('id', libRows.map(l => l.id))
         if (lErr) throw lErr
       }
+      // Drain the lines in chunks before deleting the batch row, so the FK
+      // cascade only handles the small stuff — a big batch's cascade used to
+      // blow the statement timeout (fixed with migration 20's indexes, but
+      // chunking keeps deletion safe at any size).
+      for (;;) {
+        const { data: lineRows, error: fetchErr } = await supabase
+          .from('pu_lines').select('id').eq('batch_id', id).limit(500)
+        if (fetchErr) throw fetchErr
+        if (!lineRows?.length) break
+        const { error: dErr } = await supabase.from('pu_lines')
+          .delete().in('id', lineRows.map(r => r.id))
+        if (dErr) throw dErr
+      }
       const { error: bErr } = await supabase.from('pu_batches').delete().eq('id', id)
       if (bErr) throw bErr
       router.push('/priceupdates/batches')

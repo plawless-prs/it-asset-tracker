@@ -2,6 +2,11 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-09-02
+
+- **Price Update Processor — batch deletion timed out on parsed batches (fixed, migration `20`):** `pu_lines.file_id` (and the other FK hops batch deletion cascades through) had no index, so each cascaded file-row delete seq-scanned all of `pu_lines` — "canceling statement due to statement timeout" on Delete batch once a few large batches existed. Migration `20` adds the indexes; the UI delete also now drains lines in chunks first. **Run `20_pu_delete_perf.sql`.**
+- **Price Update Processor — silent line doubling on re-parse (fixed):** `applyParse` ignored the error from its clear-previous-lines delete; when that delete timed out (same root cause as above), re-applying a mapping doubled every line — caught live on a 26k-line Midland batch that ended up with 51,972 lines. The clear is now error-checked (re-parse aborts instead of double-writing). The affected batch was deduped in place.
+
 ## 2026-08-28
 
 - **Price Update Processor — re-create a batch from its files (the redo path):** finished batches (approved/exported/applied/archived) gain a **Re-create batch** action — a fresh `received` batch gets copies of the files plus the same vendor/effective date, cross-noted both ways; the original stays untouched. The Files page gains a per-file **New batch** action doing the same from a library file. Neither auto-parses (the usual reason for a redo is a bad column mapping) and nothing re-archives to the library. Shared helper: `createBatchFromFiles()` in `lib/priceupdatesParse.js`.

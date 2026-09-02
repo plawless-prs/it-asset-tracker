@@ -25,6 +25,7 @@ Run them **in order** the first time:
 | 17 | `17_pu_library_facets.sql` | `pu_library_facets(vendor, year)` SQL function feeding the Files page's year/date dropdowns. |
 | 18 | `18_pu_reminders.sql` | `pu_settings.reminder_emails` (daily batch-reminder digest recipients). |
 | 19 | `19_p21_supplier_mirror.sql` | `p21_supplier_mirror` (read-only P21 supplier directory, synced by the worker on full syncs; powers the vendor modal's supplier lookup). |
+| 20 | `20_pu_delete_perf.sql` | Indexes on the FK columns batch deletion cascades through (`pu_lines.file_id` chiefly) — unindexed, each cascaded file-row delete seq-scanned all of `pu_lines` and big-batch deletes hit the statement timeout. |
 
 ## Notes
 

@@ -220,7 +220,13 @@ export async function applyParse(supabase, { batch, file, sheets, config, userId
   }
 
   // Re-parse is idempotent: clear this file's prior lines before inserting.
-  await supabase.from('pu_lines').delete().eq('file_id', file.id)
+  // The delete error MUST be checked — a silently failed clear (e.g. a
+  // statement timeout, seen live 2026-09 before pu_lines.file_id was indexed)
+  // followed by the insert below double-writes every line.
+  {
+    const { error: clearErr } = await supabase.from('pu_lines').delete().eq('file_id', file.id)
+    if (clearErr) throw new Error(`Could not clear the file's previous lines: ${clearErr.message}`)
+  }
 
   const rowsToInsert = lines.map(l => ({ ...l, batch_id: batch.id, file_id: file.id }))
   const CHUNK = 500
