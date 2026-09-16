@@ -59,6 +59,10 @@ export async function matchBatch(admin, batchId) {
   }
 
   // Build the mirror lookup for this supplier (both cross-ref and prefix-bridge).
+  // Every paged fetch below MUST carry an explicit .order(): Postgres gives no
+  // stable order to un-sorted LIMIT/OFFSET pages, so pages overlap and other
+  // rows are never seen. Live 2026-09-16: ~30% of Regal Rexnord's 69,760 mirror
+  // rows were skipped, leaving ~6,000 matchable lines "unmatched".
   const byKey = new Map()      // normalized key -> Map(p21_item_id -> mirrorRow)
   const byItemId = new Map()   // p21_item_id -> mirrorRow (for alias resolution)
   const addKey = (key, m) => {
@@ -73,7 +77,7 @@ export async function matchBatch(admin, batchId) {
       const { data: rows, error } = await admin
         .from('p21_item_mirror')
         .select('p21_item_id, supplier_part_no, current_cost, current_list')
-        .eq('supplier_id', supplierId).range(from, from + PAGE - 1)
+        .eq('supplier_id', supplierId).order('p21_item_id').range(from, from + PAGE - 1)
       if (error) fail(error.message)
       if (!rows || rows.length === 0) break
       for (const m of rows) {
@@ -95,7 +99,7 @@ export async function matchBatch(admin, batchId) {
     for (let from = 0; ; from += PAGE) {
       const { data: rows, error } = await admin
         .from('pu_item_aliases').select('normalized_part, p21_item_id')
-        .eq('vendor_id', batch.vendor.id).range(from, from + PAGE - 1)
+        .eq('vendor_id', batch.vendor.id).order('id').range(from, from + PAGE - 1)
       if (error) fail(error.message)
       if (!rows || rows.length === 0) break
       for (const a of rows) aliases.set(a.normalized_part, a.p21_item_id)

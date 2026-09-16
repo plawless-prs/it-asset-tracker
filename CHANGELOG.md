@@ -2,6 +2,10 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-09-16
+
+- **Price Update Processor — matcher skipped ~30% of the P21 mirror (fixed):** `matchBatch` paged the vendor's `p21_item_mirror` rows (and `pu_item_aliases`) with no `.order()`, so Postgres returned overlapping LIMIT/OFFSET pages and other rows were never seen — on the 43,727-line Regal Rexnord batch 21k of 69,760 mirror rows went unseen and ~6,000 matchable lines sat "unmatched", differing from re-run to re-run. Both fetches now sort by primary key. Re-run matching on affected batches.
+
 ## 2026-09-02
 
 - **Price Update Processor — historical file archive removed from Supabase storage:** the 2,397-file bulk import (1.3 GB, plus 287 MB of orphaned import-rerun leftovers) blew the free tier's 1 GB storage cap; per Porter it now lives on-prem/OneDrive only. The in-app library keeps just app-generated copies (batch archives + exports, a few MB) and refills organically as batches flow. `scripts/import-price-library.mjs` remains if it's ever re-imported under a bigger plan. Bucket: 1.61 GB → 6 MB.
