@@ -10,7 +10,13 @@
 //       previous batch wins outright -> matched.
 //   (a) mirror.supplier_part_no  (P21's supplier cross-reference), and
 //   (b) mirror.p21_item_id with the vendor's p21_item_prefix stripped
-//       (P21 item ids are "<prefix><space><vendor part>", e.g. "GAT QD12/…").
+//       (P21 item ids are "<prefix><space><vendor part>", e.g. "GAT QD12/…"), and
+//   (c) mirror.p21_item_id with WHATEVER precedes the first space stripped —
+//       the prefix-agnostic bridge. A vendor like Regal Rexnord spans ~80
+//       prefixes (BRN/MOR/SLM/REX/…) so a single configured prefix can't cover
+//       it, and P21's cross-ref is sometimes the vendor's numeric material no.
+//       ("BRN VPS-214" ↔ 767644) so (a) misses too. Same-part-under-two-
+//       prefixes collisions become ambiguous (auto-picked, reviewer skims).
 // Exactly one distinct P21 item -> matched; none -> unmatched. More than one ->
 // ambiguous, but the CLOSEST candidate is auto-picked (pickBestCandidate) and
 // written to the line with real old cost/list + Δ% + guardrail flag, included
@@ -83,9 +89,15 @@ export async function matchBatch(admin, batchId) {
       for (const m of rows) {
         if (!byItemId.has(m.p21_item_id)) byItemId.set(m.p21_item_id, m)
         addKey(normalizePart(m.supplier_part_no), m)
-        let idPart = m.p21_item_id || ''
+        const id = m.p21_item_id || ''
+        let idPart = id
         if (prefix && idPart.startsWith(prefix)) idPart = idPart.slice(prefix.length)
         addKey(normalizePart(idPart), m)
+        // (c) prefix-agnostic bridge: drop the leading "<TOKEN> " whatever it is.
+        // Only when the id has a space AND something before it — an id with no
+        // prefix already keys on itself via (b). addKey dedupes by item id.
+        const sp = id.indexOf(' ')
+        if (sp > 0) addKey(normalizePart(id.slice(sp + 1)), m)
       }
       mirrorRows += rows.length
       if (rows.length < PAGE) break

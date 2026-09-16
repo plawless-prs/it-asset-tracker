@@ -4,6 +4,7 @@ Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYY
 
 ## 2026-09-16
 
+- **Price Update Processor — prefix-agnostic item-id bridge in matching:** the matcher now also keys each mirror row on its P21 item id with whatever precedes the first space stripped, so multi-prefix vendors (Regal Rexnord: BRN/MOR/SLM/REX/… ~80 prefixes, no single `p21_item_prefix` fits) and items whose P21 cross-ref is the vendor's numeric material number (`BRN VPS-214` ↔ `767644`) still match. Same-part-under-two-ids collisions land in Ambiguous with the usual auto-pick (P21 near-duplicates like `SLM SF-20T  RM` / `SLM SF-20T RM` now surface there).
 - **Price Update Processor — matcher skipped ~30% of the P21 mirror (fixed):** `matchBatch` paged the vendor's `p21_item_mirror` rows (and `pu_item_aliases`) with no `.order()`, so Postgres returned overlapping LIMIT/OFFSET pages and other rows were never seen — on the 43,727-line Regal Rexnord batch 21k of 69,760 mirror rows went unseen and ~6,000 matchable lines sat "unmatched", differing from re-run to re-run. Both fetches now sort by primary key. Re-run matching on affected batches.
 
 ## 2026-09-02
