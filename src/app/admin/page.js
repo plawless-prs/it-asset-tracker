@@ -35,45 +35,31 @@ export default function AdminPage() {
     setLoading(false)
   }
 
+  // Account create/delete go through the admin-only server route (service
+  // role) — the browser never touches Supabase Auth for other users.
+  async function adminUsersApi(method, payload) {
+    const { data: { session } } = await supabase.auth.getSession()
+    try {
+      const res = await fetch('/api/admin/users', {
+        method,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token || ''}` },
+        body: JSON.stringify(payload),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) return { error: json.error || `Request failed (${res.status})` }
+      return json
+    } catch (e) {
+      return { error: String(e?.message || e) }
+    }
+  }
+
   async function handleCreateUser(formData) {
     setMessage('')
 
-    const { data: currentSession } = await supabase.auth.getSession()
-
-    const { data, error } = await supabase.auth.signUp({
-      email: formData.email,
-      password: formData.password,
-    })
-
-    if (error) {
-      setMessage('Error creating user: ' + error.message)
+    const result = await adminUsersApi('POST', formData)
+    if (result.error) {
+      alert('Error creating user: ' + result.error)
       return
-    }
-
-    if (data.user) {
-      await supabase.from('profiles').upsert({
-        id: data.user.id,
-        email: formData.email,
-        full_name: formData.full_name,
-        role: formData.role,
-        department: formData.department,
-        app_access: formData.app_access,
-      })
-
-      const { data: { user: adminUser } } = await supabase.auth.getUser()
-      await supabase.from('audit_log').insert({
-        action: 'created',
-        entity_type: 'user',
-        detail: `User "${formData.email}" created with role "${formData.role}"`,
-        user_id: adminUser?.id,
-      })
-    }
-
-    if (currentSession?.session) {
-      await supabase.auth.signInWithPassword({
-        email: prompt('Re-enter YOUR admin email to stay logged in:'),
-        password: prompt('Re-enter YOUR admin password:'),
-      })
     }
 
     setShowCreateModal(false)
@@ -138,25 +124,22 @@ export default function AdminPage() {
       }
     }
 
-    const confirmed = confirm(`Are you sure you want to delete ${profile.email || profile.full_name}? This removes their profile but their auth account will remain in Supabase.`)
+    const name = profile.email || profile.full_name
+    const confirmed = confirm(`Are you sure you want to delete ${name}? This removes their profile and their login. If they have history in the apps (tickets, batches, etc.), the account is deactivated instead: login disabled and all access removed.`)
     if (!confirmed) return
 
-    const { error } = await supabase.from('profiles').delete().eq('id', profile.id)
-
-    if (error) {
-      alert(error.message)
+    const result = await adminUsersApi('DELETE', { id: profile.id })
+    if (result.error) {
+      alert(result.error)
       return
     }
 
-    const { data: { user } } = await supabase.auth.getUser()
-    await supabase.from('audit_log').insert({
-      action: 'deleted',
-      entity_type: 'user',
-      detail: `User "${profile.email || profile.full_name}" deleted`,
-      user_id: user?.id,
-    })
-
     loadUsers()
+    setMessage(result.result === 'deactivated'
+      ? `${name} deactivated (has history) — login disabled and all access removed`
+      : `${name} deleted`)
+    if (result.warning) alert(result.warning)
+    setTimeout(() => setMessage(''), 6000)
   }
 
   async function handleEditUser(userId, formData) {

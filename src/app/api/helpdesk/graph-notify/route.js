@@ -2,7 +2,8 @@
 // 1) Subscription validation: Graph POSTs with ?validationToken=... and expects
 //    the token echoed back as text/plain within 10s.
 // 2) Notifications: Graph POSTs { value: [ ... ] } when a new email arrives.
-//    We verify clientState and branch on the queue embedded in it:
+//    We verify clientState (rejecting everything if GRAPH_CLIENT_STATE is
+//    unset) and branch on the queue embedded in it:
 //    'priceupdate' -> a Price Update Processor batch (Phase 6a; attachments
 //    and body captured, deduped on message id); anything else -> a Help Desk
 //    ticket (de-duped the same way). priceupdate@ no longer creates tickets.
@@ -11,6 +12,7 @@ import { createEmailTicket } from '../../../../lib/emailTicket'
 import { createEmailBatch } from '../../../../lib/emailBatch'
 import { autoParseBatch } from '../../../../lib/autoParse'
 import { fetchMessage, fetchMessageFull } from '../../../../lib/graph'
+import { safeEqual } from '../../../../lib/apiAuth'
 
 export const runtime = 'nodejs'
 // Auto-parse + matching on big vendor files runs after the response (via
@@ -29,6 +31,16 @@ function extractMailbox(resource) {
   return m ? decodeURIComponent(m[1]) : null
 }
 
+// Verify a notification's clientState against the secret (constant-time).
+// Accepts the bare secret (older subs) or "<secret>|<queue>" (current subs).
+// Returns null on mismatch, else { queue } (null queue for bare-secret subs).
+function checkClientState(cs, base) {
+  if (!safeEqual(cs.slice(0, base.length), base)) return null
+  if (cs.length === base.length) return { queue: null }
+  if (cs[base.length] !== '|') return null
+  return { queue: cs.slice(base.length + 1) || null }
+}
+
 export async function POST(req) {
   const url = new URL(req.url)
   const validationToken = url.searchParams.get('validationToken')
@@ -36,21 +48,26 @@ export async function POST(req) {
     return new Response(validationToken, { status: 200, headers: { 'Content-Type': 'text/plain' } })
   }
 
+  // No secret configured = no way to tell Graph from anyone else. Fail closed
+  // rather than accept every POST as a real notification.
+  const base = process.env.GRAPH_CLIENT_STATE || ''
+  if (!base) {
+    console.error('graph-notify: GRAPH_CLIENT_STATE is not set — rejecting notification')
+    return new Response('webhook secret not configured', { status: 500 })
+  }
+
   let body
   try { body = await req.json() } catch { return new Response('bad request', { status: 400 }) }
 
-  const base = process.env.GRAPH_CLIENT_STATE || ''
   const notifications = Array.isArray(body?.value) ? body.value : []
   for (const n of notifications) {
-    const cs = n.clientState || ''
-    // Accept the bare secret (older subs) or "<secret>|<queue>" (current subs).
-    if (base && cs !== base && !cs.startsWith(base + '|')) continue
+    const state = checkClientState(String(n.clientState || ''), base)
+    if (!state) continue
     try {
       const mailbox = extractMailbox(n.resource)
       const messageId = n.resourceData?.id
       if (!mailbox || !messageId) continue
-      const queueFromState = cs.includes('|') ? cs.slice(cs.indexOf('|') + 1) : null
-      const queue = queueFromState || mailboxToQueue(mailbox)
+      const queue = state.queue || mailboxToQueue(mailbox)
       if (queue === 'priceupdate') {
         const msg = await fetchMessageFull(mailbox, messageId)
         const result = await createEmailBatch({ mailbox, messageId, msg })

@@ -22,7 +22,10 @@ async function run(req) {
   const recreate = new URL(req.url).searchParams.get('recreate') === '1'
   const base = process.env.APP_BASE_URL || 'https://www.prstech.app'
   const notificationUrl = `${base}/api/helpdesk/graph-notify`
+  // graph-notify rejects everything without the secret, so a subscription
+  // created with an empty one would be dead on arrival — refuse up front.
   const clientState = process.env.GRAPH_CLIENT_STATE || ''
+  if (!clientState) return Response.json({ error: 'GRAPH_CLIENT_STATE is not set' }, { status: 500 })
   const targets = [
     { mailbox: process.env.IT_MAILBOX, queue: 'it' },
     { mailbox: process.env.PRICEUPDATE_MAILBOX, queue: 'priceupdate' },

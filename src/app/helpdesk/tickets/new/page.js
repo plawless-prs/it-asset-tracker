@@ -65,14 +65,7 @@ export default function NewTicket() {
 
     // Notify the assignee, if one was set.
     if (form.assignee_id) {
-      const assignee = profiles.find(p => p.id === form.assignee_id)
-      if (assignee?.email) {
-        sendNotify(supabase, {
-          to: assignee.email,
-          subject: `Ticket #${data.number} assigned to you: ${form.title.trim()}`,
-          body: `A Help Desk ticket has been assigned to you.\n\n${form.title.trim()}\n\n${form.description.trim()}\n\nOpen it: https://prstech.app/helpdesk/tickets/${data.id}`,
-        })
-      }
+      sendNotify(supabase, { ticketId: data.id, event: 'assigned' })
     }
 
     router.push(`/helpdesk/tickets/${data.id}`)
