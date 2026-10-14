@@ -26,6 +26,7 @@ Run them **in order** the first time:
 | 18 | `18_pu_reminders.sql` | `pu_settings.reminder_emails` (daily batch-reminder digest recipients). |
 | 19 | `19_p21_supplier_mirror.sql` | `p21_supplier_mirror` (read-only P21 supplier directory, synced by the worker on full syncs; powers the vendor modal's supplier lookup). |
 | 20 | `20_pu_delete_perf.sql` | Indexes on the FK columns batch deletion cascades through (`pu_lines.file_id` chiefly) — unindexed, each cascaded file-row delete seq-scanned all of `pu_lines` and big-batch deletes hit the statement timeout. |
+| 21 | `21_api_clients.sql` | Bot API: `api_clients` (hashed per-bot keys + scopes) and `api_client_calls` (per-request log). Service-role only — RLS on, no policies. |
 
 ## Notes
 

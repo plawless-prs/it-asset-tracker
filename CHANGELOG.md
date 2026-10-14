@@ -2,6 +2,10 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-10-14
+
+- **Bot API v1 — read-only Help Desk (migration `21`):** `/api/bot/v1/helpdesk/{tickets,tickets/[id],kb,kb/[id]}` for bots using per-client API keys (hashed in `api_clients`, scope `helpdesk:read`, 60/min per key per instance), every call logged to `api_client_calls`. Keys are created/rotated/deactivated on `/admin → Bot API clients`. Docs: `docs/bot-api.md`. **Porter: run `21_api_clients.sql`.**
+
 ## 2026-10-05
 
 - **Security hardening — user accounts are now created/deleted server-side:** new admin-only `POST`/`DELETE /api/admin/users` (service role) replaces browser `signUp()` and the "re-enter your admin password" prompts. Delete now removes the Auth login too (previously only the profile row, so "deleted" people could still sign in); users with history (tickets, batches…) can't be hard-deleted and are **deactivated** instead — login banned, role → viewer, app access cleared. **Porter: turn off "Allow new users to sign up" in Supabase, verify `profiles` RLS, and clean up Auth users left behind by earlier deletes.**

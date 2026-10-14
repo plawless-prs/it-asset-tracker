@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '../../lib/supabase'
 import { useRole } from '../../lib/useRole'
 import { useRouter } from 'next/navigation'
+import ApiClientsSection from '../../components/ApiClientsSection'
 
 export default function AdminPage() {
   const supabase = createClient()
@@ -440,6 +441,8 @@ export default function AdminPage() {
           })}
         </div>
       )}
+
+      <ApiClientsSection />
 
       {/* Create User Modal */}
       {showCreateModal && (

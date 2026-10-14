@@ -46,8 +46,9 @@ export async function proxy(request) {
 export const config = {
   // Exclude public webhook/API routes that authenticate themselves (token /
   // clientState / bearer) and are called by external systems with no browser
-  // session: Graph notifications, the subscribe/renew endpoint, and inbound email.
+  // session: Graph notifications, the subscribe/renew endpoint, inbound email,
+  // and the bot API (api/bot/* — per-client API keys, see src/lib/botAuth.js).
   matcher: [
-    '/((?!api/helpdesk/graph-notify|api/helpdesk/graph-subscribe|api/helpdesk/inbound|api/p21/sync-items|api/priceupdates/reminders|_next/static|_next/image|favicon.ico).*)',
+    '/((?!api/helpdesk/graph-notify|api/helpdesk/graph-subscribe|api/helpdesk/inbound|api/p21/sync-items|api/priceupdates/reminders|api/bot/|_next/static|_next/image|favicon.ico).*)',
   ],
 }
