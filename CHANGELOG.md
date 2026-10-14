@@ -2,6 +2,12 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-10-05
+
+- **Security hardening — user accounts are now created/deleted server-side:** new admin-only `POST`/`DELETE /api/admin/users` (service role) replaces browser `signUp()` and the "re-enter your admin password" prompts. Delete now removes the Auth login too (previously only the profile row, so "deleted" people could still sign in); users with history (tickets, batches…) can't be hard-deleted and are **deactivated** instead — login banned, role → viewer, app access cleared. **Porter: turn off "Allow new users to sign up" in Supabase, verify `profiles` RLS, and clean up Auth users left behind by earlier deletes.**
+- **Security hardening — Help Desk notify locked down:** `/api/helpdesk/notify` requires Help Desk access and only accepts a ticket id + event (`assigned`/`reply`); recipient, subject, and body are built on the server, so a logged-in session can no longer send arbitrary email as `it@`.
+- **Security hardening — Graph webhook fails closed:** `graph-notify` rejects all notifications (500) when `GRAPH_CLIENT_STATE` is unset instead of accepting everything, compares `clientState` in constant time, and `graph-subscribe` refuses to create subscriptions without the secret. **Confirm `GRAPH_CLIENT_STATE` is set in Vercel before deploying.** Shared route auth lives in the new `src/lib/apiAuth.js`.
+
 ## 2026-09-16
 
 - **Price Update Processor — prefix-agnostic item-id bridge in matching:** the matcher now also keys each mirror row on its P21 item id with whatever precedes the first space stripped, so multi-prefix vendors (Regal Rexnord: BRN/MOR/SLM/REX/… ~80 prefixes, no single `p21_item_prefix` fits) and items whose P21 cross-ref is the vendor's numeric material number (`BRN VPS-214` ↔ `767644`) still match. Same-part-under-two-ids collisions land in Ambiguous with the usual auto-pick (P21 near-duplicates like `SLM SF-20T  RM` / `SLM SF-20T RM` now surface there).

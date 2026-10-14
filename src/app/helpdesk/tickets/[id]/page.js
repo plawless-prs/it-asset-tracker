@@ -133,12 +133,7 @@ export default function TicketDetail() {
     })
     // Notify a newly assigned agent.
     if (field === 'assignee_id' && value) {
-      const a = profiles.find(p => p.id === value)
-      if (a?.email) sendNotify(supabase, {
-        to: a.email,
-        subject: `Ticket #${ticket.number} assigned to you: ${ticket.title}`,
-        body: `You've been assigned Help Desk ticket #${ticket.number}.\n\n${ticket.title}\n\nOpen it: https://prstech.app/helpdesk/tickets/${id}`,
-      })
+      sendNotify(supabase, { ticketId: id, event: 'assigned' })
     }
     // Re-fetch the ticket so DB-side changes (e.g. SLA due times recalculated by
     // the priority trigger) are reflected in the UI, not just the field we set.
@@ -154,9 +149,9 @@ export default function TicketDetail() {
   async function sendReply() {
     if (!reply.trim()) return
     setSending(true)
-    const { error } = await supabase.from('ticket_comments').insert({
+    const { data: comment, error } = await supabase.from('ticket_comments').insert({
       ticket_id: id, author_id: user?.id, body: reply.trim(), is_internal: internal,
-    })
+    }).select('id').single()
     if (error) { setSending(false); return alert('Error: ' + error.message) }
     // Stamp first response on the first public reply
     if (!internal && !ticket.first_responded_at) {
@@ -166,11 +161,7 @@ export default function TicketDetail() {
     }
     // Email the requester on a public reply (not internal notes).
     if (!internal) {
-      sendNotify(supabase, {
-        to: ticket.requester?.email || ticket.requester_email,
-        subject: `Re: [#${ticket.number}] ${ticket.title}`,
-        body: `${reply.trim()}\n\n—\nPRS Help Desk`,
-      })
+      sendNotify(supabase, { ticketId: id, event: 'reply', commentId: comment.id })
     }
     setReply(''); setInternal(false); setSending(false)
     loadComments()

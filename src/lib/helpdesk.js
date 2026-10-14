@@ -75,17 +75,19 @@ export function requesterLabel(ticket) {
   return ticket?.requester_email || 'Unknown'
 }
 
-// Best-effort outbound email via the /api/helpdesk/notify route (Power Automate).
+// Best-effort outbound email via the /api/helpdesk/notify route. The client
+// only names the ticket + event ('assigned' | 'reply', the latter with the
+// commentId to send); the server looks up the recipient and builds the email.
 // Never throws; a failed notification must not break the ticket action.
-export async function sendNotify(supabase, { to, subject, body }) {
-  if (!to || !String(to).includes('@')) return
+export async function sendNotify(supabase, { ticketId, event, commentId }) {
+  if (!ticketId || !event) return
   try {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) return
     await fetch('/api/helpdesk/notify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-      body: JSON.stringify({ to, subject, body }),
+      body: JSON.stringify({ ticket_id: ticketId, event, comment_id: commentId }),
     })
   } catch { /* best effort */ }
 }
