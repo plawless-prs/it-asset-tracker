@@ -39,7 +39,18 @@ Each app is gated per-user. Current apps: **IT Tracker** (`tracker`), **Material
 - Every app page guards itself: `if (!loading && !hasAccess('<appId>')) router.push('/')`. For multi-page apps, do it once in the app's `layout.js` (see `src/app/helpdesk/layout.js`).
 - **Server routes authorize through `src/lib/apiAuth.js`:** `requireAppAccess(req, appId, { allowCron })` validates the caller's Bearer access token, loads `profiles`, applies the same admin-or-`app_access` rule as `hasAccess()`, and returns `{ admin, user, profile }` or a ready 401/403 (`if (auth.error) return auth.error`); `requireAdmin(req)` is the admin-only form; `safeEqual()` is the constant-time compare for shared secrets (an empty value never matches). Use these for new routes instead of copying the older inline block (still present in the `priceupdates` routes).
 - **User accounts are created/deleted server-side** via the admin-only `POST`/`DELETE /api/admin/users` (service role; called by `/admin`) — never `supabase.auth.signUp()` from the browser, and public sign-up should stay **off** in the Supabase dashboard. Delete removes the profile **and** the Auth user; because `profiles` is referenced by tickets/comments/batches/etc. with no `ON DELETE`, a user with history can't be hard-deleted and is **deactivated** instead (Auth user banned, role → `viewer`, `app_access` cleared; profile row kept). Re-enabling a deactivated user means un-banning them in Supabase → Authentication, then restoring access on `/admin`. Role/app-access/profile edits on `/admin` are still client-side writes that rely on `profiles` RLS.
-- `src/proxy.js` (Next 16's renamed middleware convention) redirects logged-out users to `/login` for everything **except** the public webhook API routes listed in its `matcher` (Graph notify/subscribe, inbound email). If you add a public/externally-called API route, add it to that exclusion or it will 307-redirect and break.
+- `src/proxy.js` (Next 16's renamed middleware convention) redirects logged-out users to `/login` for everything **except** the public webhook API routes listed in its `matcher` (Graph notify/subscribe, inbound email, `api/bot/*`). If you add a public/externally-called API route, add it to that exclusion or it will 307-redirect and break.
+
+## Bot API (`/api/bot/v1`)
+
+Read-only HTTP API for bots (first user: the Help Desk triage bot) — no Supabase key on the bot side. Full reference + examples: `docs/bot-api.md`.
+
+- **Auth:** per-client keys (`Authorization: Bearer prs_…`) via `requireBotScope(req, scope)` in `src/lib/botAuth.js` → `{ client, admin }` or a ready error. Keys are stored as **SHA-256 hash + 12-char prefix only** in `api_clients` (migration `21`); 401 missing/unknown/inactive, 403 missing scope, 429 over **60/min per key — in-memory per server instance** (real ceiling = 60 × live Vercel instances). Scopes: `BOT_SCOPES` in `botAuth.js` (v1: `helpdesk:read`).
+- **Routes** (`src/app/api/bot/v1/helpdesk/`): `tickets` (status/q/limit/offset; default open+in_progress+waiting), `tickets/[id]` (uuid or ticket number; `public_comments` vs `internal_comments`), `kb` (published only; `q` → `search_kb()`, max 5), `kb/[id]` (uuid or slug). Shared column lists/shaping in `src/lib/botHelpdesk.js`. Errors are always `{ error: { code, message } }` (`botError`/`botFail`); success via `botJson`.
+- **Service role ⇒ RLS doesn't protect you here:** every bot route must name its columns (never `select('*')`), filter KB to `status='published'`, and keep internal comments labeled. New bot routes also need a scope check and the call log.
+- **Logging:** every attributed call (incl. 4xx/429) → `api_client_calls` (service-role only, RLS on, no policies) — **not** `audit_log`, which feeds the IT Tracker history. Key admin actions do go to `audit_log` (`entity_type='api_client'`).
+- **Key management:** admin-only `GET/POST/PATCH /api/admin/api-clients` (`requireAdmin`; create / activate / deactivate / rotate — plain key returned once) behind the "Bot API clients" section on `/admin` (`src/components/ApiClientsSection.js`).
+- Bots must call the **`www`** host (apex redirects drop the `Authorization` header in most clients).
 
 ## Data access & RLS
 
@@ -108,7 +119,7 @@ Migrations are plain SQL in `supabase/`, run manually in the Supabase SQL Editor
 
 ## Docs
 
-`docs/` holds the transition plan, data model, build spec, deprecation checklist, and email-integration setup guides (`email-setup-graph.md` is current; `email-setup-power-automate.md` is the alternative).
+`docs/` holds the transition plan, data model, build spec, deprecation checklist, the bot API reference (`bot-api.md`), and email-integration setup guides (`email-setup-graph.md` is current; `email-setup-power-automate.md` is the alternative).
 
 ## Conventions recap
 
