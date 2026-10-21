@@ -182,25 +182,26 @@ export function botFail(auth, req, status, code, message, params) {
 //
 //   const auth = await requireBotWrite(req, 'helpdesk:write', { targetType: 'ticket' })
 //   if (auth.error) return auth.error
-//   const body = await readJson(...)                       // parse + allow-list validate
+//   const body = await readJson(...)                       // parse + allow-list validate (incl. lookups)
 //   if (invalid) return botWriteFail(auth, req, 400, 'invalid_param', '…', { summary })
 //   const idem = await requireIdempotencyKey(auth, req)    // creates; idempotencyKeyFrom() on PATCH
 //   if (idem.error) return idem.error
 //   const summary = summarizeBody(body)
 //   if (auth.dryRun) return botWriteJson(auth, req, { data: wouldBe, dry_run: true }, { summary })
-//   const route = 'POST /helpdesk/tickets'
-//   const requestHash = hashRequest(body)
-//   const idemCheck = await checkIdempotency(auth, idem.key, route, requestHash)
-//   if (idemCheck.error) return idemCheck.error
-//   if (idemCheck.replay) return idemCheck.replay
-//   const started = await startWrite(auth, req, { summary, idempotencyKey: idem.key })
-//   if (started.error) return started.error              // log insert failed → nothing written
-//   ...write (actor = auth.actor.id)...
-//   const responseBody = { data: row }
-//   await saveIdempotency(auth, idem.key, route, requestHash, 201, responseBody)
-//   return botWriteJson(auth, req, responseBody, { status: 201, targetIds: [row.id] })
+//   return runWrite(auth, req, { route: 'POST /helpdesk/tickets', body, idemKey: idem.key, summary }, async () => {
+//     ...write (actor = auth.actor.id)...
+//     if (failedBeforeAnythingWasCommitted) return { error: { status: 500, code: 'internal_error', message } }
+//     return { status: 201, body: { data: row }, targetIds: [row.id] }
+//   })
 //
-// Write routes must NEVER call sendNotify / sendGraphMail (bots email nobody).
+// runWrite = reserveIdempotency (replay / 422 conflict / 409 in-progress
+// return early) → startWrite (log failure: release the key, return 500,
+// write nothing) → write (error: release the key so the bot can retry,
+// botWriteFail) → completeIdempotency → botWriteJson.
+//
+// Write routes must NEVER call sendNotify / sendGraphMail / /api/helpdesk/notify.
+// The only email a bot write may cause is the "assigned to you" mail, via
+// sendAssignedEmail() in src/lib/helpdeskNotify.js (scheduled with after()).
 
 // Count this client's write calls since `sinceMs` ago (429s excluded).
 export async function countWrites(admin, clientId, sinceMs) {
@@ -360,10 +361,14 @@ export function summarizeBody(obj) {
 // ---- Idempotency -----------------------------------------------------------
 // A repeat with the same Idempotency-Key + same body replays the stored
 // response; same key with a different body (or route) → 422. Keys are scoped
-// per client. Stored after the write succeeds, so two truly concurrent
-// requests with one key can both write — bots should not fire retries in
-// parallel. Rows can be cleaned up after 7 days (see migration 22).
+// per client. The key is RESERVED before writing (an api_idempotency row with
+// status 0 = in progress; the PK makes the insert the lock), so a concurrent
+// duplicate gets 409 idempotency_in_progress instead of writing twice. A
+// reservation older than IDEM_STALE_MS (the request died mid-write) can be
+// taken over. Rows can be cleaned up after 7 days (see migration 22).
 const IDEM_KEY_RE = /^[A-Za-z0-9._:-]{1,200}$/
+const IDEM_RESERVED = 0
+const IDEM_STALE_MS = 2 * 60_000
 
 // → { key } (key = null when the header is absent) or { invalid: true }.
 export function readIdempotencyKey(req) {
@@ -401,8 +406,133 @@ export function hashRequest(body) {
   return createHash('sha256').update(stableStringify(body)).digest('hex')
 }
 
+async function replayResponse(auth, request, key, row) {
+  await logWriteCall(auth, request, row.status, { idempotencyKey: key, summary: { replay: true } })
+  return Response.json(row.response ?? {}, { status: row.status, headers: { 'Idempotent-Replay': 'true' } })
+}
+
+async function idempotencyFail(auth, request, key, kind) {
+  if (kind === 'conflict') {
+    return botWriteFail(auth, request, 422, 'idempotency_conflict',
+      'This Idempotency-Key was already used with a different request. Use a new key.', { idempotencyKey: key })
+  }
+  if (kind === 'in_progress') {
+    return botWriteFail(auth, request, 409, 'idempotency_in_progress',
+      'A request with this Idempotency-Key is still being processed. Retry shortly.',
+      { idempotencyKey: key, headers: { 'Retry-After': '5' } })
+  }
+  return botWriteFail(auth, request, 500, 'internal_error', 'Could not check the Idempotency-Key.', { idempotencyKey: key })
+}
+
+// Reserve the key before writing. → { reserved: true } (proceed, then
+// completeIdempotency / releaseIdempotency), { reserved: false } (no key —
+// proceed), { replay: Response }, or { error: Response } (422 conflict, 409
+// in progress, 500). The request comes from requireBotWrite's context.
+export async function reserveIdempotency(auth, key, route, requestHash, req) {
+  if (!key) return { reserved: false }
+  const request = req || auth.write.req
+  const ids = { client_id: auth.client.id, idem_key: key }
+  const { error: insErr } = await auth.admin.from('api_idempotency').insert({
+    ...ids, route, request_hash: requestHash, status: IDEM_RESERVED, response: null,
+  })
+  if (!insErr) return { reserved: true }
+  if (insErr.code !== '23505') {
+    console.error('reserveIdempotency insert:', insErr.message)
+    return { error: await idempotencyFail(auth, request, key, 'internal') }
+  }
+
+  const { data, error } = await auth.admin
+    .from('api_idempotency')
+    .select('route, request_hash, status, response, created_at')
+    .match(ids)
+    .maybeSingle()
+  if (error) {
+    console.error('reserveIdempotency read:', error.message)
+    return { error: await idempotencyFail(auth, request, key, 'internal') }
+  }
+  // Released between our insert and read: the other request failed. Let the bot retry.
+  if (!data) return { error: await idempotencyFail(auth, request, key, 'in_progress') }
+  if (data.route !== route || data.request_hash !== requestHash) {
+    return { error: await idempotencyFail(auth, request, key, 'conflict') }
+  }
+  if (data.status !== IDEM_RESERVED) return { replay: await replayResponse(auth, request, key, data) }
+
+  if (Date.now() - new Date(data.created_at).getTime() < IDEM_STALE_MS) {
+    return { error: await idempotencyFail(auth, request, key, 'in_progress') }
+  }
+  const cutoff = new Date(Date.now() - IDEM_STALE_MS).toISOString()
+  // Stale reservation: take it over, unless another retry just beat us to it.
+  const { data: taken, error: tErr } = await auth.admin
+    .from('api_idempotency')
+    .update({ created_at: new Date().toISOString() })
+    .match({ ...ids, status: IDEM_RESERVED })
+    .lt('created_at', cutoff)
+    .select('idem_key')
+  if (tErr) {
+    console.error('reserveIdempotency takeover:', tErr.message)
+    return { error: await idempotencyFail(auth, request, key, 'internal') }
+  }
+  if (!taken?.length) return { error: await idempotencyFail(auth, request, key, 'in_progress') }
+  return { reserved: true }
+}
+
+// Store the final response on the reserved row for future replays.
+export async function completeIdempotency(auth, key, status, response) {
+  if (!key) return
+  const { error } = await auth.admin
+    .from('api_idempotency')
+    .update({ status, response })
+    .match({ client_id: auth.client.id, idem_key: key })
+  if (error) console.error('completeIdempotency:', error.message)
+}
+
+// The write failed: drop the reservation so the bot can retry with the same key.
+export async function releaseIdempotency(auth, key) {
+  if (!key) return
+  const { error } = await auth.admin
+    .from('api_idempotency')
+    .delete()
+    .match({ client_id: auth.client.id, idem_key: key, status: IDEM_RESERVED })
+  if (error) console.error('releaseIdempotency:', error.message)
+}
+
+// The reserve → log → write → complete sequence every write route shares.
+// `write` runs only after the key is reserved and the call is logged. It
+// returns { status, body, targetIds, count? } on success, or
+// { error: { status, code, message }, targetIds? } when nothing was committed
+// (the reservation is released so a retry with the same key can write).
+export async function runWrite(auth, req, { route, body, idemKey, summary }, write) {
+  const requestHash = hashRequest(body)
+  const r = await reserveIdempotency(auth, idemKey, route, requestHash, req)
+  if (r.error) return r.error
+  if (r.replay) return r.replay
+
+  const started = await startWrite(auth, req, { summary, idempotencyKey: idemKey })
+  if (started.error) {
+    await releaseIdempotency(auth, idemKey)
+    return started.error
+  }
+
+  let result
+  try {
+    result = await write()
+  } catch (e) {
+    console.error(`${route} write:`, e)
+    result = { error: { status: 500, code: 'internal_error', message: 'Unexpected error while writing.' } }
+  }
+  if (result.error) {
+    await releaseIdempotency(auth, idemKey)
+    const { status, code, message } = result.error
+    return botWriteFail(auth, req, status, code, message, { targetIds: result.targetIds })
+  }
+
+  await completeIdempotency(auth, idemKey, result.status, result.body)
+  return botWriteJson(auth, req, result.body, { status: result.status, targetIds: result.targetIds, count: result.count ?? 1 })
+}
+
+// Older check-then-write pair (PR 1), kept for compatibility. Not race-safe —
+// new routes use reserveIdempotency / runWrite.
 // → {} (proceed), { replay: Response }, or { error: Response }. No key → {}.
-// The request comes from requireBotWrite's context, for logging.
 export async function checkIdempotency(auth, key, route, requestHash, req) {
   if (!key) return {}
   const request = req || auth.write.req
@@ -414,20 +544,14 @@ export async function checkIdempotency(auth, key, route, requestHash, req) {
     .maybeSingle()
   if (error) {
     console.error('checkIdempotency:', error.message)
-    return { error: await botWriteFail(auth, request, 500, 'internal_error', 'Could not check the Idempotency-Key.') }
+    return { error: await idempotencyFail(auth, request, key, 'internal') }
   }
   if (!data) return {}
   if (data.route !== route || data.request_hash !== requestHash) {
-    return {
-      error: await botWriteFail(auth, request, 422, 'idempotency_conflict',
-        'This Idempotency-Key was already used with a different request. Use a new key.',
-        { idempotencyKey: key }),
-    }
+    return { error: await idempotencyFail(auth, request, key, 'conflict') }
   }
-  await logWriteCall(auth, request, data.status, { idempotencyKey: key, summary: { replay: true } })
-  return {
-    replay: Response.json(data.response ?? {}, { status: data.status, headers: { 'Idempotent-Replay': 'true' } }),
-  }
+  if (data.status === IDEM_RESERVED) return { error: await idempotencyFail(auth, request, key, 'in_progress') }
+  return { replay: await replayResponse(auth, request, key, data) }
 }
 
 // Store the response for future replays. A duplicate key is ignored.

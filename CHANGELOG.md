@@ -4,6 +4,8 @@ Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYY
 
 ## 2026-10-21
 
+- **Bot API — Help Desk + KB writes (no migration):** `helpdesk:write` → create/update tickets, internal notes, KB links; `kb:write` → list/read/create/edit **draft** KB articles (never publish). Bot assignments email the assignee "assigned to you" (only email a bot can cause); mailbox/self assignees refused, and `/api/helpdesk/notify` now skips mailbox recipients for `assigned`.
+- **Bot API — idempotency race closed:** `Idempotency-Key` is reserved before writing, so a concurrent duplicate gets 409 `idempotency_in_progress` instead of writing twice; failed writes release the key for retry.
 - **Bot API — write foundation (migration `22`, no data write endpoints yet):** 8 new scopes (`helpdesk:write`, `kb:write`, `assets:*`, `dailyops:*`, `pricing:*`), editable per key on `/admin → Bot API clients` along with an **"Acts as"** profile that bot writes will be attributed to; `requireBotWrite()` adds synchronous pre-write logging, `Idempotency-Key` replay, `dry_run`, and DB-backed write limits (20/min, 500/day). New `GET /api/bot/v1/whoami`. **Porter: run `22_bot_api_writes.sql`, then set "Acts as" + scopes on /admin.**
 
 ## 2026-10-14
