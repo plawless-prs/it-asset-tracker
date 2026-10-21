@@ -27,6 +27,7 @@ Run them **in order** the first time:
 | 19 | `19_p21_supplier_mirror.sql` | `p21_supplier_mirror` (read-only P21 supplier directory, synced by the worker on full syncs; powers the vendor modal's supplier lookup). |
 | 20 | `20_pu_delete_perf.sql` | Indexes on the FK columns batch deletion cascades through (`pu_lines.file_id` chiefly) — unindexed, each cascaded file-row delete seq-scanned all of `pu_lines` and big-batch deletes hit the statement timeout. |
 | 21 | `21_api_clients.sql` | Bot API: `api_clients` (hashed per-bot keys + scopes) and `api_client_calls` (per-request log). Service-role only — RLS on, no policies. |
+| 22 | `22_bot_api_writes.sql` | Bot API write foundation: `api_clients.acting_profile_id` ("Acts as"), write columns on `api_client_calls`, the service-role-only `api_idempotency` table, and `created_via_client_id`/`via_client_id` markers on `tickets`/`ticket_comments`/`kb_articles`. |
 
 ## Notes
 
