@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { createClient } from '../../lib/supabase'
 import { useRole } from '../../lib/useRole'
 import { todayCentral } from '../../lib/priceupdates'
-import { isTemplateDue, personLabel } from '../../lib/dailyops'
+import { ensureInstancesForDate, instanceStatusFor, personLabel } from '../../lib/dailyops'
 
 // Today's view: every active template due today renders as a checklist card.
 // Instances are created LAZILY on page load (upsert today's sop_instances +
@@ -23,46 +23,8 @@ export default function DailyOpsToday() {
   async function load() {
     setError('')
     try {
-      const { data: templates, error: tErr } = await supabase
-        .from('sop_templates')
-        .select('id, title, description, frequency, sort_order, items:sop_template_items(id, label, instructions, required, sort_order)')
-        .eq('active', true)
-        .order('sort_order')
-      if (tErr) throw tErr
-      const due = (templates || []).filter(t => isTemplateDue(t.frequency, today))
-
-      // Lazy instance creation — ignoreDuplicates keeps concurrent loads safe
-      // (unique on template_id + due_date).
-      if (due.length) {
-        const { error: iErr } = await supabase.from('sop_instances').upsert(
-          due.map(t => ({ template_id: t.id, due_date: today })),
-          { onConflict: 'template_id,due_date', ignoreDuplicates: true },
-        )
-        if (iErr) throw iErr
-      }
-      const { data: instances, error: gErr } = await supabase
-        .from('sop_instances')
-        .select('id, template_id, status, completed_at')
-        .eq('due_date', today)
-      if (gErr) throw gErr
-
-      // Seed the per-item checkbox rows for the instances we just ensured.
-      const seedRows = []
-      for (const inst of instances || []) {
-        const t = (templates || []).find(x => x.id === inst.template_id)
-        for (const it of t?.items || []) seedRows.push({ instance_id: inst.id, template_item_id: it.id })
-      }
-      if (seedRows.length) {
-        const { error: sErr } = await supabase.from('sop_item_status').upsert(
-          seedRows, { onConflict: 'instance_id,template_item_id', ignoreDuplicates: true },
-        )
-        if (sErr) throw sErr
-      }
-      const { data: statuses, error: stErr } = await supabase
-        .from('sop_item_status')
-        .select('id, instance_id, template_item_id, checked, checked_by, checked_at')
-        .in('instance_id', (instances || []).map(i => i.id))
-      if (stErr) throw stErr
+      // Lazy instance creation + item seeding (shared with the bot API).
+      const { templates, instances, statuses } = await ensureInstancesForDate(supabase, today)
 
       const checkerIds = [...new Set((statuses || []).map(s => s.checked_by).filter(Boolean))]
       if (checkerIds.length) {
@@ -85,7 +47,7 @@ export default function DailyOpsToday() {
     }
   }
 
-  useEffect(() => { load() }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [])   // eslint-disable-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
 
   async function toggle(card, row) {
     const nowChecked = !row.status?.checked
@@ -105,8 +67,8 @@ export default function DailyOpsToday() {
 
     // Instance status is derived from required items: all checked -> done.
     const after = card.items.map(r => r === row ? { ...r, status: { ...r.status, ...patch } } : r)
-    const allDone = after.filter(r => r.ti.required).every(r => r.status?.checked)
-    const nextStatus = allDone ? 'done' : 'todo'
+    const nextStatus = instanceStatusFor(after.map(r => ({ required: r.ti.required, checked: r.status?.checked })))
+    const allDone = nextStatus === 'done'
     if (nextStatus !== card.instance.status) {
       const { error: iErr } = await supabase.from('sop_instances').update({
         status: nextStatus,
