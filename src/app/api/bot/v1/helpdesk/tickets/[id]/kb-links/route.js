@@ -3,7 +3,8 @@
 // the bot just wrote); the ticket GET still lists published articles only.
 //   POST { article_id }  — already linked → 200 with already_linked: true.
 //   Idempotency-Key optional; ?dry_run=1.
-import { requireBotWrite, idempotencyKeyFrom, botWriteJson, runWrite } from '../../../../../../../../lib/botAuth'
+import { requireBotWrite, idempotencyKeyFrom, botWriteJson, runWrite, replayIfCompleted } from '../../../../../../../../lib/botAuth'
+import { findTicket } from '../../../../../../../../lib/botHelpdesk'
 import {
   withValidation, readBody, allowKeys, uuidField, loadTicket, reject,
 } from '../../../../../../../../lib/botHelpdeskWrite'
@@ -18,6 +19,11 @@ export async function POST(req, { params }) {
 
   return withValidation(auth, req, async (ctx) => {
     const body = await readBody(req, ctx)
+    // Exact replays are answered before any state-dependent check (see replayIfCompleted).
+    const idem = await idempotencyKeyFrom(auth, req)
+    if (idem.error) return idem.error
+    const replay = await replayIfCompleted(auth, req, idem.key, async () => { const t = (await findTicket(admin, rawId, 'id')).ticket; return t ? `POST /helpdesk/tickets/${t.id}/kb-links` : null }, body)
+    if (replay) return replay
     allowKeys(body, ['article_id'])
     const articleId = uuidField(body, 'article_id', { required: true })
     const ticket = await loadTicket(admin, rawId, 'id, number')
@@ -28,9 +34,6 @@ export async function POST(req, { params }) {
       reject(500, 'internal_error', 'Database error while validating the request.')
     }
     if (!article) reject(400, 'invalid_param', "'article_id' doesn't match a KB article.")
-
-    const idem = await idempotencyKeyFrom(auth, req)
-    if (idem.error) return idem.error
 
     const shape = link => ({
       id: link?.id ?? null,

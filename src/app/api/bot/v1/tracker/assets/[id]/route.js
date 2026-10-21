@@ -6,7 +6,7 @@
 //       Idempotency-Key optional; ?dry_run=1.
 // Cost fields and photos are never returned or accepted. See docs/bot-api.md.
 import {
-  requireBotScope, botJson, botFail, requireBotWrite, idempotencyKeyFrom, botWriteJson, runWrite,
+  requireBotScope, botJson, botFail, requireBotWrite, idempotencyKeyFrom, botWriteJson, runWrite, replayIfCompleted,
 } from '../../../../../../../lib/botAuth'
 import { withValidation, readBody, invalid } from '../../../../../../../lib/botWrite'
 import {
@@ -57,6 +57,11 @@ export async function PATCH(req, { params }) {
 
   return withValidation(auth, req, async (ctx) => {
     const body = await readBody(req, ctx)
+    // Exact replays are answered before any state-dependent check (see replayIfCompleted).
+    const idem = await idempotencyKeyFrom(auth, req)
+    if (idem.error) return idem.error
+    const replay = await replayIfCompleted(auth, req, idem.key, async () => { const a = (await findAsset(admin, rawId, 'id')).asset; return a ? `PATCH /tracker/assets/${a.id}` : null }, body)
+    if (replay) return replay
     const { fields, allowDuplicateSerial } = readAssetFields(body, { create: false })
     if (!EDIT_FIELDS.some(f => fields[f] !== undefined)) invalid(`Send at least one of: ${EDIT_FIELDS.join(', ')}.`)
 
@@ -81,8 +86,6 @@ export async function PATCH(req, { params }) {
       await checkDuplicateSerial(admin, fields.serial_number, { excludeId: asset.id, allow: allowDuplicateSerial })
     }
 
-    const idem = await idempotencyKeyFrom(auth, req)
-    if (idem.error) return idem.error
     const targetIds = [String(asset.id)]
 
     if (!changed.length) {

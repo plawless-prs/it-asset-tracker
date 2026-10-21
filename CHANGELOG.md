@@ -4,6 +4,7 @@ Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYY
 
 ## 2026-10-21
 
+- **Bot API — idempotent replays fixed:** an exact repeat (same `Idempotency-Key` + body) is now answered from the stored response *before* any state-dependent check, so it replays (`Idempotent-Replay: true`) instead of failing e.g. 409 `duplicate_serial` / `not_checkoutable` / `not_draft`. Applies to every keyed write route (`replayIfCompleted()` in `botAuth.js`).
 - **Bot API — IT Tracker endpoints (no migration):** `assets:read` → assets (list/detail incl. History), employee directory (read-only), locations; `assets:write` → create/edit assets, check out / check in, each also logged to IT Tracker History as "… by <name> (bot)". Cost data and photos are never exposed; Disposed/Lost-Stolen stay human-only.
 - **Bot API — Help Desk + KB writes (no migration):** `helpdesk:write` → create/update tickets, internal notes, KB links; `kb:write` → list/read/create/edit **draft** KB articles (never publish). Bot assignments email the assignee "assigned to you" (only email a bot can cause); mailbox/self assignees refused, and `/api/helpdesk/notify` now skips mailbox recipients for `assigned`.
 - **Bot API — idempotency race closed:** `Idempotency-Key` is reserved before writing, so a concurrent duplicate gets 409 `idempotency_in_progress` instead of writing twice; failed writes release the key for retry.

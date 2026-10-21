@@ -4,10 +4,10 @@
 //       assignment. Refused for rack-mountable assets and assets that are
 //       already Deployed (AssetDetail's Check Out gating), and for Disposed /
 //       Lost/Stolen ones. Idempotency-Key optional; ?dry_run=1. See docs/bot-api.md.
-import { requireBotWrite, idempotencyKeyFrom, botWriteJson, runWrite } from '../../../../../../../../lib/botAuth'
+import { requireBotWrite, idempotencyKeyFrom, botWriteJson, runWrite, replayIfCompleted } from '../../../../../../../../lib/botAuth'
 import { withValidation, readBody, allowKeys, uuidField, reject } from '../../../../../../../../lib/botWrite'
 import {
-  ASSET_DETAIL_COLUMNS, shapeAssetDetail, loadAsset, assertNotLocked, loadActiveEmployee,
+  ASSET_DETAIL_COLUMNS, findAsset, shapeAssetDetail, loadAsset, assertNotLocked, loadActiveEmployee,
   botActorLabel, logAssetHistory,
 } from '../../../../../../../../lib/botTracker'
 
@@ -21,6 +21,11 @@ export async function POST(req, { params }) {
 
   return withValidation(auth, req, async (ctx) => {
     const body = await readBody(req, ctx)
+    // Exact replays are answered before any state-dependent check (see replayIfCompleted).
+    const idem = await idempotencyKeyFrom(auth, req)
+    if (idem.error) return idem.error
+    const replay = await replayIfCompleted(auth, req, idem.key, async () => { const a = (await findAsset(admin, rawId, 'id')).asset; return a ? `POST /tracker/assets/${a.id}/checkout` : null }, body)
+    if (replay) return replay
     allowKeys(body, ['employee_id'])
     const employeeId = uuidField(body, 'employee_id', { required: true })
 
@@ -34,8 +39,6 @@ export async function POST(req, { params }) {
     }
     const employee = await loadActiveEmployee(admin, employeeId)
 
-    const idem = await idempotencyKeyFrom(auth, req)
-    if (idem.error) return idem.error
     const targetIds = [String(asset.id)]
 
     const now = new Date().toISOString()

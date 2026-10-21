@@ -3,8 +3,8 @@
 // visible to the requester), and an internal note doesn't count as a first
 // response, so first_responded_at is left alone. No email is sent.
 //   POST { body, visibility?: 'internal' }  — Idempotency-Key required; ?dry_run=1
-import { requireBotWrite, requireIdempotencyKey, botWriteJson, runWrite } from '../../../../../../../../lib/botAuth'
-import { person, shapeComment } from '../../../../../../../../lib/botHelpdesk'
+import { requireBotWrite, requireIdempotencyKey, botWriteJson, runWrite, replayIfCompleted } from '../../../../../../../../lib/botAuth'
+import { findTicket, person, shapeComment } from '../../../../../../../../lib/botHelpdesk'
 import {
   withValidation, readBody, allowKeys, strField, loadTicket, reject, LIMITS, COMMENT_COLUMNS,
 } from '../../../../../../../../lib/botHelpdeskWrite'
@@ -19,6 +19,11 @@ export async function POST(req, { params }) {
 
   return withValidation(auth, req, async (ctx) => {
     const body = await readBody(req, ctx)
+    // Exact replays are answered before any state-dependent check (see replayIfCompleted).
+    const idem = await requireIdempotencyKey(auth, req)
+    if (idem.error) return idem.error
+    const replay = await replayIfCompleted(auth, req, idem.key, async () => { const t = (await findTicket(admin, rawId, 'id')).ticket; return t ? `POST /helpdesk/tickets/${t.id}/comments` : null }, body)
+    if (replay) return replay
     allowKeys(body, ['body', 'visibility'])
     const text = strField(body, 'body', { required: true, max: LIMITS.text })
     if (body.visibility !== undefined && body.visibility !== 'internal') {
@@ -28,9 +33,6 @@ export async function POST(req, { params }) {
       reject(400, 'invalid_param', "'visibility' must be 'internal' (the only value accepted).")
     }
     const ticket = await loadTicket(admin, rawId, 'id, number')
-
-    const idem = await requireIdempotencyKey(auth, req)
-    if (idem.error) return idem.error
 
     if (auth.dryRun) {
       return botWriteJson(auth, req, {

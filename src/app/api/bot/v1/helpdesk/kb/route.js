@@ -6,7 +6,7 @@
 //   POST (kb:write) create a DRAFT article (never published by a bot), optionally
 //     linked to a ticket. Idempotency-Key required; ?dry_run=1.
 import {
-  requireBotScope, botJson, botFail, requireBotWrite, requireIdempotencyKey, botWriteJson, runWrite,
+  requireBotScope, botJson, botFail, requireBotWrite, requireIdempotencyKey, botWriteJson, runWrite, replayIfCompleted,
 } from '../../../../../../lib/botAuth'
 import { KB_LIST_COLUMNS, intParam, shapeKbSummary } from '../../../../../../lib/botHelpdesk'
 import { slugify } from '../../../../../../lib/kb'
@@ -86,6 +86,11 @@ export async function POST(req) {
 
   return withValidation(auth, req, async (ctx) => {
     const body = await readBody(req, ctx)
+    // Exact replays are answered before any state-dependent check (see replayIfCompleted).
+    const idem = await requireIdempotencyKey(auth, req)
+    if (idem.error) return idem.error
+    const replay = await replayIfCompleted(auth, req, idem.key, 'POST /helpdesk/kb', body)
+    if (replay) return replay
     allowKeys(body, CREATE_FIELDS, { status: DRAFT_ONLY, published_at: DRAFT_ONLY, slug: DRAFT_ONLY })
     const title = strField(body, 'title', { required: true, max: LIMITS.title })
     const text = strField(body, 'body', { required: true, max: LIMITS.kbBody })
@@ -93,9 +98,6 @@ export async function POST(req) {
     const categoryId = uuidField(body, 'category_id', { nullable: true })
     const category = categoryId ? await loadKbCategory(admin, categoryId) : null
     const ticket = body.ticket_id != null ? await loadReferencedTicket(admin, 'ticket_id', body.ticket_id) : null
-
-    const idem = await requireIdempotencyKey(auth, req)
-    if (idem.error) return idem.error
 
     const baseSlug = slugify(title)
     const row = {

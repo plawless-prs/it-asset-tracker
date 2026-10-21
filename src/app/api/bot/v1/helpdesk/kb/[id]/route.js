@@ -4,7 +4,7 @@
 //     (published/archived → 409 not_draft). Never changes status, published_at,
 //     slug or author. Idempotency-Key optional; ?dry_run=1.
 import {
-  requireBotScope, botJson, botFail, requireBotWrite, idempotencyKeyFrom, botWriteJson, runWrite,
+  requireBotScope, botJson, botFail, requireBotWrite, idempotencyKeyFrom, botWriteJson, runWrite, replayIfCompleted,
 } from '../../../../../../../lib/botAuth'
 import { KB_DETAIL_COLUMNS, findKbArticle, shapeKbArticle } from '../../../../../../../lib/botHelpdesk'
 import {
@@ -44,6 +44,11 @@ export async function PATCH(req, { params }) {
 
   return withValidation(auth, req, async (ctx) => {
     const body = await readBody(req, ctx)
+    // Exact replays are answered before any state-dependent check (see replayIfCompleted).
+    const idem = await idempotencyKeyFrom(auth, req)
+    if (idem.error) return idem.error
+    const replay = await replayIfCompleted(auth, req, idem.key, async () => { const a = (await findKbArticle(admin, rawId, 'id')).article; return a ? `PATCH /helpdesk/kb/${a.id}` : null }, body)
+    if (replay) return replay
     allowKeys(body, PATCH_FIELDS,
       { status: NOT_EDITABLE, published_at: NOT_EDITABLE, slug: NOT_EDITABLE, author_id: NOT_EDITABLE })
     const next = {
@@ -67,9 +72,6 @@ export async function PATCH(req, { params }) {
       const c = next.category_id ? await loadKbCategory(admin, next.category_id) : null
       category = c ? { name: c.name, slug: c.slug } : null
     }
-
-    const idem = await idempotencyKeyFrom(auth, req)
-    if (idem.error) return idem.error
 
     if (!changed.length) {
       return botWriteJson(auth, req, {
