@@ -4,8 +4,8 @@ A small HTTP API so bots (starting with Porter's Help Desk triage bot) can use H
 
 - **Base URL:** `https://www.prstech.app/api/bot/v1` — use the `www` host (the apex 307-redirects, and many HTTP clients drop the `Authorization` header on redirect).
 - **Auth:** `Authorization: Bearer <api key>`
-- **Format:** JSON in, JSON out. Help Desk + KB and IT Tracker have read and write endpoints; other modules arrive PR by PR (see [Writes](#writes-conventions)).
-- **Code:** `src/lib/botAuth.js` (auth, rate limit, logging, idempotency, `runWrite`), `src/lib/botHelpdesk.js` (column lists, lookups, response shaping), `src/lib/botWrite.js` (generic write-side validation), `src/lib/botHelpdeskWrite.js` (Help Desk/KB validation), `src/lib/botTracker.js` (IT Tracker columns, shaping, validation), `src/lib/helpdeskNotify.js` (the one email a bot write can cause), routes under `src/app/api/bot/v1/`.
+- **Format:** JSON in, JSON out. Help Desk + KB, IT Tracker and Daily Ops have read and write endpoints; other modules arrive PR by PR (see [Writes](#writes-conventions)).
+- **Code:** `src/lib/botAuth.js` (auth, rate limit, logging, idempotency, `runWrite`), `src/lib/botHelpdesk.js` (column lists, lookups, response shaping), `src/lib/botWrite.js` (generic write-side validation), `src/lib/botHelpdeskWrite.js` (Help Desk/KB validation), `src/lib/botTracker.js` (IT Tracker columns, shaping, validation), `src/lib/botDailyOps.js` (Daily Ops columns, shaping, validation), `src/lib/helpdeskNotify.js` (the one email a bot write can cause), routes under `src/app/api/bot/v1/`.
 
 ## Keys & scopes
 
@@ -18,8 +18,8 @@ Keys are created on **/admin → Bot API clients** (admins only). The plain key 
 | `kb:write` | Create and edit **draft** KB articles (never publish) | ✅ `GET` kb/drafts, kb/drafts/{id}, `POST` kb, `PATCH` kb/{id} |
 | `assets:read` | Read assets, employees, locations | ✅ `GET` tracker/assets, tracker/assets/{id}, tracker/employees, tracker/employees/{id}, tracker/locations |
 | `assets:write` | Create/update assets, check out / check in | ✅ `POST` tracker/assets, `PATCH` tracker/assets/{id}, `POST` tracker/assets/{id}/checkout, `POST` tracker/assets/{id}/checkin |
-| `dailyops:read` | Today's checklists, tasks | — (PR 4) |
-| `dailyops:write` | Create/update tasks, check off checklist items | — (PR 4) |
+| `dailyops:read` | Today's checklists, tasks | ✅ `GET` dailyops/today, dailyops/tasks, dailyops/tasks/{id} |
+| `dailyops:write` | Create/update tasks, check off checklist items | ✅ `POST` dailyops/tasks, `PATCH` dailyops/tasks/{id}, `PATCH` dailyops/checklist-items/{id} |
 | `pricing:read` | Price batches, lines, vendors, worker status | — (PR 5) |
 | `pricing:write` | **Stage only** (create batch, upload, re-match, include/exclude) — never approve/export/apply | — (PR 6) |
 
@@ -60,10 +60,10 @@ Every error uses the same shape:
 |---|---|---|
 | 400 | `invalid_param` | Bad `status` value, malformed id, unknown body field, malformed `Idempotency-Key` |
 | 400 | `idempotency_key_required` | A create endpoint was called without an `Idempotency-Key` header (not required on `dry_run`) |
-| 400 | `invalid_param` | Also: missing/blank/too-long body field, bad enum, a body reference that doesn't exist (`requester_id`, `category_id`, `article_id`, `ticket_id`), or a refused field (`source`, `status`, `slug`…) |
+| 400 | `invalid_param` | Also: missing/blank/too-long body field, bad enum, a body reference that doesn't exist (`requester_id`, `category_id`, `article_id`, `ticket_id`, task `assigned_to`), or a refused field (`source`, `status`, `slug`…) |
 | 401 | `unauthorized` | Missing, unknown, or **inactive** key |
 | 403 | `forbidden` | Key valid but lacks the endpoint's scope |
-| 404 | `not_found` | Ticket/article/asset/employee doesn't exist (or KB article isn't published) |
+| 404 | `not_found` | Ticket/article/asset/employee/task/checklist item doesn't exist (or KB article isn't published) |
 | 409 | `not_configured` | Write endpoint, but the key has no "Acts as" profile (or it no longer exists) |
 | 409 | `idempotency_in_progress` | Another request with the same `Idempotency-Key` is still running (`Retry-After: 5`) |
 | 409 | `not_draft` | `PATCH /helpdesk/kb/{id}` on a published or archived article |
@@ -71,7 +71,9 @@ Every error uses the same shape:
 | 409 | `not_checkoutable` | Checkout of a rack-mountable or already-`Deployed` asset |
 | 409 | `not_checked_out` | Check-in of an asset that isn't `Deployed` |
 | 409 | `duplicate_serial` | Asset `serial_number` already on another non-Disposed asset (case-insensitive) — resend with `allow_duplicate_serial: true` if intended |
-| 409 | `conflict` | The asset changed between validation and the write (e.g. someone disposed it); nothing was written — re-read and retry |
+| 409 | `conflict` | The asset/task/checklist item changed between validation and the write (e.g. someone disposed the asset, changed the task's status, or toggled the item); nothing was written — re-read and retry |
+| 409 | `not_today` | Checklist item on a day other than today (Central) |
+| 409 | `template_inactive` | Checklist item whose template has been deactivated |
 | 422 | `idempotency_conflict` | `Idempotency-Key` reused with a different body or endpoint |
 | 422 | `invalid_assignee` | `assignee_id` isn't an agent (`role = 'admin'`), doesn't exist, is the key's own acting profile, or is a mailbox profile (`IT_MAILBOX` / `PRICEUPDATE_MAILBOX`) |
 | 422 | `public_comments_disabled` | A comment with `visibility: "public"` — bots post internal notes only |
@@ -95,7 +97,7 @@ from api_client_calls order by created_at desc limit 50;
 
 ## Writes (conventions)
 
-Foundation shipped in PR 1 (migration `22`, `requireBotWrite()` + `runWrite()` in `src/lib/botAuth.js`); Help Desk + KB write endpoints in PR 2 ([below](#help-desk-writes-helpdeskwrite)), IT Tracker in PR 3 ([below](#it-tracker-assetsread--assetswrite)), other modules per PR. Every write endpoint follows these rules:
+Foundation shipped in PR 1 (migration `22`, `requireBotWrite()` + `runWrite()` in `src/lib/botAuth.js`); Help Desk + KB write endpoints in PR 2 ([below](#help-desk-writes-helpdeskwrite)), IT Tracker in PR 3 ([below](#it-tracker-assetsread--assetswrite)), Daily Ops in PR 4 ([below](#daily-ops-dailyopsread--dailyopswrite)), other modules per PR. Every write endpoint follows these rules:
 
 - **Acts as:** requires the key's "Acts as" profile (409 `not_configured` otherwise).
 - **Allow-listed fields:** unknown body fields → 400 `invalid_param`; the body is never passed straight to the database.
@@ -109,7 +111,7 @@ Foundation shipped in PR 1 (migration `22`, `requireBotWrite()` + `runWrite()` i
   Stored responses can be purged after 7 days (`delete from api_idempotency where created_at < now() - interval '7 days';`).
 - **Logged before writing, synchronously:** the call row is inserted (status `102` = in progress) *before* any data changes and updated with the final status + target ids afterwards. If that log row can't be inserted, the endpoint returns 500 and writes nothing — a write is never unlogged.
 - **Write limits (DB-backed, shared across server instances):** 20 writes/minute and 500 per rolling 24 hours per key, counted from `api_client_calls`; 429 responses are logged but not counted. The in-memory 60 requests/min still applies to everything.
-- **Email — only "assigned to you":** when a bot sets or changes a ticket's `assignee_id` to someone (create or PATCH), the assignee gets the normal "Ticket #N assigned to you" email, sent as `it@` after the response via `sendAssignedEmail()` (`src/lib/helpdeskNotify.js`), best-effort and never on a dry run. Nothing else emails anyone: no requester email ever, no reply email (bot comments are internal-only), nothing on status/resolve/close, nothing from KB or IT Tracker writes. Assignees that would loop back into a mailbox the app reads, or onto the bot's own acting profile, are refused (422 `invalid_assignee`); `/api/helpdesk/notify` also skips an assignee whose email is `IT_MAILBOX`/`PRICEUPDATE_MAILBOX` for human assignments.
+- **Email — only "assigned to you":** when a bot sets or changes a ticket's `assignee_id` to someone (create or PATCH), the assignee gets the normal "Ticket #N assigned to you" email, sent as `it@` after the response via `sendAssignedEmail()` (`src/lib/helpdeskNotify.js`), best-effort and never on a dry run. Nothing else emails anyone: no requester email ever, no reply email (bot comments are internal-only), nothing on status/resolve/close, nothing from KB, IT Tracker or Daily Ops writes. Assignees that would loop back into a mailbox the app reads, or onto the bot's own acting profile, are refused (422 `invalid_assignee`); `/api/helpdesk/notify` also skips an assignee whose email is `IT_MAILBOX`/`PRICEUPDATE_MAILBOX` for human assignments.
 - **Dry runs validate fully**, including every lookup (ticket, assignee, requester, category, article), then return the would-be result: no DB writes, no email.
 
 ```sql
@@ -571,6 +573,135 @@ curl -s -X POST "https://www.prstech.app/api/bot/v1/tracker/assets/PRS-00142/che
 
 All four writes: `?dry_run=1` runs every check and lookup and returns the would-be asset (no DB write, no History entry); `target_type = 'asset'`, `target_ids = [asset id]` in the call log. If the History insert fails after the asset changed, the write still succeeds (the failure is logged server-side).
 
+## Daily Ops (`dailyops:read` / `dailyops:write`)
+
+Today's recurring SOP checklists and one-off tasks. Code: `src/lib/botDailyOps.js` (columns, shaping, validation), `ensureInstancesForDate()` / `instanceStatusFor()` in `src/lib/dailyops.js` (shared with the `/dailyops` page) + routes under `src/app/api/bot/v1/dailyops/`.
+
+- **"Today" is Central time** (`todayCentral()`), like the app. Which templates are due: **daily** every day, **weekly** on Mondays, **monthly** on the 1st; **ad hoc** templates are never instantiated automatically.
+- **No email, no reminders** — Daily Ops has none, for humans or bots.
+- **Attribution:** tasks the bot creates get `created_by` = the "Acts as" profile (the Tasks page shows "· created by <name>"); checklist items it checks get `checked_by` = that profile (the Today page shows the name under the item). **Task edits and status changes are not attributed** — `tasks` has no "changed by" column, so the UI can't show who moved a task to done (the call log in `api_client_calls` still records it).
+- **Templates are read-only** to the bot — no template/item writes.
+
+### GET `/dailyops/today` (`dailyops:read`)
+
+**Side effect:** exactly like a person opening `/dailyops`, this lazily creates today's checklist instances (`sop_instances`) and their per-item rows (`sop_item_status`) if they don't exist yet. It's idempotent (unique keys + `ignoreDuplicates`), so calling it repeatedly or concurrently with a human page load is safe. Instances of deactivated templates are hidden.
+
+```json
+{
+  "date": "2026-10-21",
+  "checklists": [
+    {
+      "instance_id": "9b0c…",
+      "due_date": "2026-10-21",
+      "status": "todo",
+      "completed_at": null,
+      "template": { "id": "51aa…", "title": "Morning server check", "description": "…", "frequency": "daily" },
+      "items": [
+        {
+          "id": "c4e2…",
+          "template_item_id": "77f1…",
+          "label": "Backups completed overnight",
+          "instructions": "Check the Veeam report email",
+          "required": true,
+          "checked": true,
+          "checked_by": { "id": "0d3f…", "name": "Helpdesk Triage (bot)", "email": "…" },
+          "checked_at": "2026-10-21T13:05:00+00:00"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Cards are in template order, items in item order. An item's `id` is the `sop_item_status` id — the `{id}` for `PATCH /dailyops/checklist-items/{id}`. Instance `status` is `done` once every **required** item is checked (a checklist with no required items counts as done), else `todo`.
+
+### GET `/dailyops/tasks` (`dailyops:read`)
+
+| Param | Default | Notes |
+|---|---|---|
+| `status` | `todo,in_progress` | One or more of `todo`, `in_progress`, `done`, `skipped` (comma-separated), or `all` |
+| `assigned_to` | — | Assignee profile uuid |
+| `due_before` | — | `YYYY-MM-DD`, **exclusive** (`due_date < due_before`); tasks with no due date are left out |
+| `q` | — | Case-insensitive substring of `title` |
+| `limit` / `offset` | 25 / 0 | limit 1–100. Ordered newest first (`created_at` desc, then `id`) |
+
+→ `{ "data": [ …task… ], "pagination": { "limit": 25, "offset": 0, "total": 4 }, "filters": { … } }`. Task shape:
+
+```json
+{
+  "id": "e0a1…", "title": "Replace UPS battery in rack 2", "description": null,
+  "status": "todo", "priority": "high",
+  "assignee": { "id": "0d3f…", "name": "Jane Doe", "email": "…" },
+  "creator": { "id": "8a2b…", "name": "Helpdesk Triage (bot)", "email": "…" },
+  "due_date": "2026-10-24", "overdue": false,
+  "created_at": "…", "completed_at": null
+}
+```
+
+`overdue` is derived (due date before today, Central, and status `todo`/`in_progress`) — never stored.
+
+### GET `/dailyops/tasks/{id}` (`dailyops:read`)
+
+`{id}` = task uuid. → `{ "data": { …task… } }`.
+
+### POST `/dailyops/tasks` (`dailyops:write`)
+
+Create a task. **`Idempotency-Key` required.** Status is always `todo`; `created_by` is the "Acts as" profile.
+
+| Field | | Notes |
+|---|---|---|
+| `title` | required | ≤ 200 |
+| `description` | optional | ≤ 5,000; `null`/`""` = none |
+| `priority` | default `medium` | `low` / `medium` / `high` / `urgent` |
+| `assigned_to` | optional | an existing profile uuid (else 400), or `null` |
+| `due_date` | optional | `YYYY-MM-DD` (a real date), or `null` |
+
+`status`, `created_by`, `completed_at` → 400. Unknown fields → 400.
+
+```bash
+curl -s -X POST "https://www.prstech.app/api/bot/v1/dailyops/tasks?dry_run=1" \
+  -H "Authorization: Bearer $PRS_BOT_KEY" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: chat-7c41-task" \
+  -d '{"title":"Replace UPS battery in rack 2","priority":"high","assigned_to":"0d3f…","due_date":"2026-10-24"}'
+```
+
+`201` → `{ "data": { …task… } }`. Dry run → `200` `{ "data": { "id": null, … }, "dry_run": true }`.
+
+### PATCH `/dailyops/tasks/{id}` (`dailyops:write`)
+
+Edit any of `status` (`todo`/`in_progress`/`done`/`skipped`), `title`, `description`, `priority`, `assigned_to`, `due_date` (same validation as create; `title` can't be cleared). `Idempotency-Key` optional.
+
+- `status: "done"` stamps `completed_at` = now; any other status clears it (same as the Tasks page's Start / Done / Reopen buttons). Use `skipped` instead of deleting.
+- Only fields that actually change are written; nothing changed → `200` with `"unchanged": true`. Response: `{ "data": { …task… }, "changed": ["status"] }`.
+- The write is guarded on the status that was read: if someone changes the task's status in between → 409 `conflict`, nothing written — re-read and retry.
+
+```bash
+curl -s -X PATCH "https://www.prstech.app/api/bot/v1/dailyops/tasks/e0a1…" \
+  -H "Authorization: Bearer $PRS_BOT_KEY" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: chat-7c41-done" \
+  -d '{"status":"done"}'
+```
+
+### PATCH `/dailyops/checklist-items/{id}` (`dailyops:write`)
+
+Check or uncheck one item on **today's** checklist. `{id}` = the item's `id` from `GET /dailyops/today` (a `sop_item_status` id). Body: `{ "checked": true }` or `{ "checked": false }` — nothing else (`note` → 400). `Idempotency-Key` optional.
+
+- Same write as ticking the box on `/dailyops`: `checked`, `checked_by` = the "Acts as" profile (null when unchecking), `checked_at` = now (null when unchecking). Then the checklist's status is recomputed from **all** its items — every required item checked → `done` (with `completed_at`), else `todo` (clears `completed_at`).
+- **409 `not_today`** — the item belongs to another day's checklist (only today's, Central, can change). **409 `template_inactive`** — the checklist's template was deactivated.
+- Already in the requested state → `200` with `"unchanged": true`, nothing written.
+- Guarded on the checked state that was read: a concurrent toggle by someone else → 409 `conflict`, nothing written. If the item saves but the checklist status update then fails (or races), the item change stands; the failure is logged server-side and the response carries the checklist's current status.
+
+```bash
+curl -s -X PATCH "https://www.prstech.app/api/bot/v1/dailyops/checklist-items/c4e2…?dry_run=1" \
+  -H "Authorization: Bearer $PRS_BOT_KEY" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: chat-7c41-check-backups" \
+  -d '{"checked":true}'
+```
+
+→ `{ "data": { "item": { …item, as in /today… }, "instance": { "id": "9b0c…", "status": "done", "completed_at": "…" } } }`. Call log: `target_type = 'checklist_item'`, `target_ids = [item id, instance id]`.
+
+All three writes: `?dry_run=1` runs every check (incl. `not_today`, `template_inactive`, the assignee lookup) and returns the would-be result with `"dry_run": true`; nothing is written. Task writes log `target_type = 'task'`.
+
 ## Quick auth checks
 
 ```bash
@@ -584,4 +715,4 @@ A key deactivated on /admin returns 401; a key without `helpdesk:read` returns 4
 
 ## Not available yet
 
-Daily Ops and pricing endpoints ship in later PRs. Sending arbitrary email is never exposed (the only email a bot write can cause is the "assigned to you" mail above). New scopes go in `BOT_SCOPES` + `BOT_SCOPE_INFO` in `src/lib/botAuth.js` (the admin routes validate against it and the /admin checkboxes render from it).
+Pricing endpoints ship in later PRs. Daily Ops templates (`sop_templates` / `sop_template_items`) have no bot write access. Sending arbitrary email is never exposed (the only email a bot write can cause is the "assigned to you" mail above). New scopes go in `BOT_SCOPES` + `BOT_SCOPE_INFO` in `src/lib/botAuth.js` (the admin routes validate against it and the /admin checkboxes render from it).

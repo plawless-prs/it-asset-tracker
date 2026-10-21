@@ -155,6 +155,7 @@ export default function DailyOpsTasks() {
                     {t.assignee ? personLabel(t.assignee) : 'Unassigned'}
                     {t.due_date && <span style={{ color: overdue ? '#f87171' : '#4a5a6e' }}> · due {formatDate(t.due_date)}{overdue ? ' (overdue)' : ''}</span>}
                     {t.completed_at && <span> · finished {formatDate(t.completed_at)}</span>}
+                    {t.creator && <span> · created by {personLabel(t.creator)}</span>}
                   </div>
                 </div>
                 <span style={{ padding: '2px 9px', borderRadius: '999px', fontSize: '10.5px', fontWeight: '600', backgroundColor: sm.pillBg, color: sm.pillText, marginTop: '3px' }}>{sm.label}</span>
