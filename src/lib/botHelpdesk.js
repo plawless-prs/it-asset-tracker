@@ -24,7 +24,7 @@ export const isUuid = (v) => UUID_RE.test(String(v || ''))
 
 const baseUrl = () => process.env.APP_BASE_URL || 'https://www.prstech.app'
 
-function cleanId(raw) {
+export function cleanId(raw) {
   const s = String(raw ?? '')
   try { return decodeURIComponent(s).trim() } catch { return s.trim() }
 }
