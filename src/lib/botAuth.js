@@ -476,6 +476,41 @@ export async function reserveIdempotency(auth, key, route, requestHash, req) {
   return { reserved: true }
 }
 
+// Early replay — call right after reading the body and Idempotency-Key, BEFORE
+// any state-dependent validation (duplicate serial, not_checkoutable,
+// not_draft, lookups whose answer changes once the first request succeeded).
+// An exact repeat of a completed request (same key + route + body) gets the
+// stored response with Idempotent-Replay: true; the same key with a different
+// route/body gets 422 idempotency_conflict; a fresh reservation still in
+// flight gets 409 idempotency_in_progress. Returns a Response, or null to
+// carry on (no key, dry run, unknown key, stale reservation — runWrite's
+// reserveIdempotency still guards the write itself).
+// `route` is the same string later passed to runWrite, or an async function
+// returning it (resolve a path id → canonical id; return null if not found).
+export async function replayIfCompleted(auth, req, key, route, body) {
+  if (!key || auth.dryRun) return null
+  const { data, error } = await auth.admin
+    .from('api_idempotency')
+    .select('route, request_hash, status, response, created_at')
+    .eq('client_id', auth.client.id)
+    .eq('idem_key', key)
+    .maybeSingle()
+  if (error) {
+    console.error('replayIfCompleted:', error.message)
+    return null
+  }
+  if (!data) return null
+  const resolved = typeof route === 'function' ? await route() : route
+  if (!resolved || data.route !== resolved || data.request_hash !== hashRequest(body)) {
+    return idempotencyFail(auth, req, key, 'conflict')
+  }
+  if (data.status === IDEM_RESERVED) {
+    if (Date.now() - new Date(data.created_at).getTime() >= IDEM_STALE_MS) return null
+    return idempotencyFail(auth, req, key, 'in_progress')
+  }
+  return replayResponse(auth, req, key, data)
+}
+
 // Store the final response on the reserved row for future replays.
 export async function completeIdempotency(auth, key, status, response) {
   if (!key) return

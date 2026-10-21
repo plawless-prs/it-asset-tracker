@@ -102,7 +102,7 @@ Foundation shipped in PR 1 (migration `22`, `requireBotWrite()` + `runWrite()` i
 - **No deletes:** there are no DELETE endpoints; "removal" uses soft states (ticket `closed`, asset `Archived`, task `skipped`, line excluded).
 - **`?dry_run=1`** (or `true`): validates and returns the would-be result without writing. Dry runs are logged (`request_summary.dry_run = true`) and count toward the write limits.
 - **`Idempotency-Key` header** (1–200 chars of `A-Z a-z 0-9 . _ : -`): **required on creates**, optional on updates. Keys are per client. The key is **reserved before writing** (an `api_idempotency` row with `status = 0` = in progress), then filled with the final response:
-  - same key + same body, finished → the stored response is replayed with header `Idempotent-Replay: true` (logged as a replay);
+  - same key + same body, finished → the stored response is replayed with header `Idempotent-Replay: true` (logged as a replay) — checked **before** any state-dependent validation, so a replay never fails on checks like `duplicate_serial`, `not_checkoutable` or `not_draft` that the first request itself changed;
   - same key + same body, still running → 409 `idempotency_in_progress` (`Retry-After: 5`) — retry later, it'll replay. A reservation older than 2 minutes (the original request died) is taken over by the retry;
   - same key with a different body or endpoint (PATCH endpoints include the target id) → 422 `idempotency_conflict`;
   - the write failed (any error response after the key was reserved) → the reservation is released, so retrying with the **same key** is safe.

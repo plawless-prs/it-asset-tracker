@@ -3,10 +3,10 @@
 //       tracker/assets/page.js: status 'Ready to Deploy', assignment cleared.
 //       Only for Deployed assets. Idempotency-Key optional; ?dry_run=1.
 // See docs/bot-api.md.
-import { requireBotWrite, idempotencyKeyFrom, botWriteJson, runWrite } from '../../../../../../../../lib/botAuth'
+import { requireBotWrite, idempotencyKeyFrom, botWriteJson, runWrite, replayIfCompleted } from '../../../../../../../../lib/botAuth'
 import { withValidation, readEmptyBody, reject } from '../../../../../../../../lib/botWrite'
 import {
-  ASSET_DETAIL_COLUMNS, shapeAssetDetail, loadAsset, assertNotLocked, botActorLabel, logAssetHistory,
+  ASSET_DETAIL_COLUMNS, findAsset, shapeAssetDetail, loadAsset, assertNotLocked, botActorLabel, logAssetHistory,
 } from '../../../../../../../../lib/botTracker'
 
 export const runtime = 'nodejs'
@@ -19,6 +19,11 @@ export async function POST(req, { params }) {
 
   return withValidation(auth, req, async (ctx) => {
     const body = await readEmptyBody(req, ctx)
+    // Exact replays are answered before any state-dependent check (see replayIfCompleted).
+    const idem = await idempotencyKeyFrom(auth, req)
+    if (idem.error) return idem.error
+    const replay = await replayIfCompleted(auth, req, idem.key, async () => { const a = (await findAsset(admin, rawId, 'id')).asset; return a ? `POST /tracker/assets/${a.id}/checkin` : null }, body)
+    if (replay) return replay
 
     const asset = await loadAsset(admin, rawId)
     assertNotLocked(asset)
@@ -26,8 +31,6 @@ export async function POST(req, { params }) {
       reject(409, 'not_checked_out', `This asset isn't checked out (status '${asset.status}').`)
     }
 
-    const idem = await idempotencyKeyFrom(auth, req)
-    if (idem.error) return idem.error
     const targetIds = [String(asset.id)]
 
     const patch = {

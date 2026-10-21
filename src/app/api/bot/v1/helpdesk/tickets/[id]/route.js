@@ -6,7 +6,7 @@
 //       plus an optional internal `comment`. Mirrors updateField() in
 //       helpdesk/tickets/[id]/page.js. Idempotency-Key optional; ?dry_run=1.
 import {
-  requireBotScope, botJson, botFail, requireBotWrite, idempotencyKeyFrom, botWriteJson, runWrite,
+  requireBotScope, botJson, botFail, requireBotWrite, idempotencyKeyFrom, botWriteJson, runWrite, replayIfCompleted,
 } from '../../../../../../../lib/botAuth'
 import {
   TICKET_COLUMNS, TICKET_STATUSES, findTicket, person, shapeTicket, shapeComment, shapeActivity,
@@ -85,6 +85,11 @@ export async function PATCH(req, { params }) {
 
   return withValidation(auth, req, async (ctx) => {
     const body = await readBody(req, ctx)
+    // Exact replays are answered before any state-dependent check (see replayIfCompleted).
+    const idem = await idempotencyKeyFrom(auth, req)
+    if (idem.error) return idem.error
+    const replay = await replayIfCompleted(auth, req, idem.key, async () => { const t = (await findTicket(admin, rawId, 'id')).ticket; return t ? `PATCH /helpdesk/tickets/${t.id}` : null }, body)
+    if (replay) return replay
     allowKeys(body, PATCH_FIELDS)
     const next = {
       status: enumField(body, 'status', TICKET_STATUSES),
@@ -108,9 +113,6 @@ export async function PATCH(req, { params }) {
       .map(f => ({ field: f, from: current[f], to: next[f] }))
     const assigneeChange = changes.find(c => c.field === 'assignee_id')
     const newAssignee = assigneeChange?.to ? await validateAssignee(admin, auth, assigneeChange.to) : null
-
-    const idem = await idempotencyKeyFrom(auth, req)
-    if (idem.error) return idem.error
 
     if (!changes.length && comment === undefined) {
       return botWriteJson(auth, req, {

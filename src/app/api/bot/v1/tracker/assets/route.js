@@ -7,7 +7,7 @@
 //   POST (assets:write) create an asset; Idempotency-Key required; ?dry_run=1.
 // Cost fields and photos are never returned or accepted. See docs/bot-api.md.
 import {
-  requireBotScope, botJson, botFail, requireBotWrite, requireIdempotencyKey, botWriteJson, runWrite,
+  requireBotScope, botJson, botFail, requireBotWrite, requireIdempotencyKey, botWriteJson, runWrite, replayIfCompleted,
 } from '../../../../../../lib/botAuth'
 import { intParam, isUuid, searchTerm } from '../../../../../../lib/botHelpdesk'
 import { withValidation, readBody } from '../../../../../../lib/botWrite'
@@ -100,13 +100,15 @@ export async function POST(req) {
 
   return withValidation(auth, req, async (ctx) => {
     const body = await readBody(req, ctx)
+    // Exact replays are answered before any state-dependent check (see replayIfCompleted).
+    const idem = await requireIdempotencyKey(auth, req)
+    if (idem.error) return idem.error
+    const replay = await replayIfCompleted(auth, req, idem.key, 'POST /tracker/assets', body)
+    if (replay) return replay
     const { fields, allowDuplicateSerial } = readAssetFields(body, { create: true })
     checkTypeRules(fields)
     const { location, room } = await checkLocationRoom(admin, fields)
     await checkDuplicateSerial(admin, fields.serial_number, { allow: allowDuplicateSerial })
-
-    const idem = await requireIdempotencyKey(auth, req)
-    if (idem.error) return idem.error
 
     // Every allow-listed column is written (absent → null), like AssetModal's
     // record. asset_tag comes from the column default; rack fields stay off.

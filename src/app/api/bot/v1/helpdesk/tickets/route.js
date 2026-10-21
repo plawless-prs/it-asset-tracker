@@ -7,7 +7,7 @@
 //       required; ?dry_run=1. Emails the assignee "assigned to you" if one is set.
 // See docs/bot-api.md.
 import {
-  requireBotScope, botJson, botFail, requireBotWrite, requireIdempotencyKey, botWriteJson, runWrite,
+  requireBotScope, botJson, botFail, requireBotWrite, requireIdempotencyKey, botWriteJson, runWrite, replayIfCompleted,
 } from '../../../../../../lib/botAuth'
 import {
   TICKET_COLUMNS, TICKET_STATUSES, DEFAULT_TICKET_STATUSES,
@@ -73,6 +73,11 @@ export async function POST(req) {
 
   return withValidation(auth, req, async (ctx) => {
     const body = await readBody(req, ctx)
+    // Exact replays are answered before any state-dependent check (see replayIfCompleted).
+    const idem = await requireIdempotencyKey(auth, req)
+    if (idem.error) return idem.error
+    const replay = await replayIfCompleted(auth, req, idem.key, 'POST /helpdesk/tickets', body)
+    if (replay) return replay
     allowKeys(body, CREATE_FIELDS, { source: "'source' is set by the API (bot tickets are always 'chat')." })
     const title = strField(body, 'title', { required: true, max: LIMITS.title })
     const description = strField(body, 'description', { required: true, max: LIMITS.text })
@@ -80,9 +85,6 @@ export async function POST(req) {
     const category = enumField(body, 'category', CATEGORY_IDS) ?? 'other'
     const requester = await resolveRequester(admin, body)
     const assignee = body.assignee_id != null ? await validateAssignee(admin, auth, body.assignee_id) : null
-
-    const idem = await requireIdempotencyKey(auth, req)
-    if (idem.error) return idem.error
 
     const row = {
       title, description, priority, category, source: 'chat',
