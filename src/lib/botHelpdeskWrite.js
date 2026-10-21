@@ -4,14 +4,20 @@
 // anything is written (and before a dry run answers).
 //
 // Validators throw a WriteRejection; routes wrap their pre-write work in
-// withValidation(), which turns it into a logged botWriteFail response.
+// withValidation(), which turns it into a logged botWriteFail response. The
+// generic helpers live in botWrite.js and are re-exported here so the Help Desk
+// routes can import everything from one place.
 import { after } from 'next/server'
-import { botWriteFail, summarizeBody } from './botAuth'
+import { has, invalid, dbFail, reject, strField, uuidField } from './botWrite'
 import { CATEGORY_OPTIONS, PRIORITY_ORDER } from './helpdesk'
 import {
   KB_DETAIL_COLUMNS, KB_LIST_COLUMNS, findKbArticle, findTicket, isUuid, shapeKbArticle, shapeKbSummary,
 } from './botHelpdesk'
 import { isMailboxAddress, sendAssignedEmail } from './helpdeskNotify'
+
+export {
+  WriteRejection, reject, withValidation, readBody, allowKeys, strField, enumField, uuidField,
+} from './botWrite'
 
 export const TICKET_PRIORITIES = PRIORITY_ORDER
 export const CATEGORY_IDS = CATEGORY_OPTIONS.map(c => c.id)
@@ -33,90 +39,6 @@ export function scheduleAssignedEmail(admin, ticketId) {
     const r = await sendAssignedEmail(admin, ticketId)
     if (r.error) console.error(`bot assigned email (ticket ${ticketId}):`, r.error)
   })
-}
-
-export class WriteRejection extends Error {
-  constructor(status, code, message) {
-    super(message)
-    this.status = status
-    this.code = code
-  }
-}
-
-export function reject(status, code, message) {
-  throw new WriteRejection(status, code, message)
-}
-
-const invalid = message => reject(400, 'invalid_param', message)
-
-function dbFail(where, error) {
-  console.error(`${where}:`, error.message)
-  reject(500, 'internal_error', 'Database error while validating the request.')
-}
-
-// Runs fn(ctx); a WriteRejection becomes a logged error response (with the
-// body summary, once readBody has set it). Anything else propagates.
-export async function withValidation(auth, req, fn) {
-  const ctx = { summary: null }
-  try {
-    return await fn(ctx)
-  } catch (e) {
-    if (!(e instanceof WriteRejection)) throw e
-    return botWriteFail(auth, req, e.status, e.code, e.message, { summary: ctx.summary })
-  }
-}
-
-// ---- Body shape ------------------------------------------------------------
-
-export async function readBody(req, ctx) {
-  let body
-  try { body = await req.json() } catch { invalid('Body must be valid JSON.') }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) invalid('Body must be a JSON object.')
-  ctx.summary = summarizeBody(body)
-  return body
-}
-
-// Unknown keys → 400 listing them. `forbidden` = known-but-refused keys with
-// their own message (e.g. status on a KB create).
-export function allowKeys(body, allowed, forbidden = {}) {
-  const keys = Object.keys(body)
-  const refused = keys.find(k => k in forbidden)
-  if (refused) invalid(forbidden[refused])
-  const unknown = keys.filter(k => !allowed.includes(k))
-  if (unknown.length) invalid(`Unknown field(s): ${unknown.join(', ')}. Allowed: ${allowed.join(', ')}.`)
-}
-
-const has = (body, key) => Object.prototype.hasOwnProperty.call(body, key)
-
-// Trimmed string field. Absent → undefined; required/blank/too long → 400.
-export function strField(body, key, { required = false, max }) {
-  if (!has(body, key) || body[key] === null) {
-    if (required) invalid(`'${key}' is required.`)
-    if (body[key] === null) invalid(`'${key}' can't be null.`)
-    return undefined
-  }
-  if (typeof body[key] !== 'string') invalid(`'${key}' must be a string.`)
-  const v = body[key].trim()
-  if (!v) invalid(`'${key}' can't be blank.`)
-  if (v.length > max) invalid(`'${key}' is too long (max ${max} characters).`)
-  return v
-}
-
-export function enumField(body, key, values) {
-  if (!has(body, key)) return undefined
-  if (!values.includes(body[key])) invalid(`'${key}' must be one of ${values.join(', ')}.`)
-  return body[key]
-}
-
-// uuid field. `nullable` → null is accepted (e.g. unassign / clear category).
-export function uuidField(body, key, { required = false, nullable = false } = {}) {
-  if (!has(body, key)) {
-    if (required) invalid(`'${key}' is required.`)
-    return undefined
-  }
-  if (body[key] === null && nullable) return null
-  if (!isUuid(body[key])) invalid(`'${key}' must be a uuid${nullable ? ' or null' : ''}.`)
-  return String(body[key]).toLowerCase()
 }
 
 // Array of strings, trimmed, blanks dropped, de-duplicated; ≤20, each ≤50 chars.
