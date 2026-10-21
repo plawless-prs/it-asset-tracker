@@ -2,6 +2,10 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-10-21
+
+- **Bot API — write foundation (migration `22`, no data write endpoints yet):** 8 new scopes (`helpdesk:write`, `kb:write`, `assets:*`, `dailyops:*`, `pricing:*`), editable per key on `/admin → Bot API clients` along with an **"Acts as"** profile that bot writes will be attributed to; `requireBotWrite()` adds synchronous pre-write logging, `Idempotency-Key` replay, `dry_run`, and DB-backed write limits (20/min, 500/day). New `GET /api/bot/v1/whoami`. **Porter: run `22_bot_api_writes.sql`, then set "Acts as" + scopes on /admin.**
+
 ## 2026-10-14
 
 - **Bot API v1 — read-only Help Desk (migration `21`):** `/api/bot/v1/helpdesk/{tickets,tickets/[id],kb,kb/[id]}` for bots using per-client API keys (hashed in `api_clients`, scope `helpdesk:read`, 60/min per key per instance), every call logged to `api_client_calls`. Keys are created/rotated/deactivated on `/admin → Bot API clients`. Docs: `docs/bot-api.md`. **Porter: run `21_api_clients.sql`.**
