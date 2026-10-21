@@ -1,10 +1,19 @@
-// Bot API — Help Desk knowledge base (read-only, scope helpdesk:read).
-// Published articles only.
-//   GET ?q=<text>  → ranked search via search_kb() (migration 02; returns at
-//                    most 5 hits — limit can only lower that)
-//   GET (no q)     → newest-updated first, &limit=25 (max 100) &offset=0
-import { requireBotScope, botJson, botFail } from '../../../../../../lib/botAuth'
+// Bot API — Help Desk knowledge base.
+//   GET (helpdesk:read) published articles only.
+//     ?q=<text>  → ranked search via search_kb() (migration 02; returns at
+//                  most 5 hits — limit can only lower that)
+//     (no q)     → newest-updated first, &limit=25 (max 100) &offset=0
+//   POST (kb:write) create a DRAFT article (never published by a bot), optionally
+//     linked to a ticket. Idempotency-Key required; ?dry_run=1.
+import {
+  requireBotScope, botJson, botFail, requireBotWrite, requireIdempotencyKey, botWriteJson, runWrite,
+} from '../../../../../../lib/botAuth'
 import { KB_LIST_COLUMNS, intParam, shapeKbSummary } from '../../../../../../lib/botHelpdesk'
+import { slugify } from '../../../../../../lib/kb'
+import {
+  withValidation, readBody, allowKeys, strField, uuidField, tagsField, loadKbCategory, loadReferencedTicket,
+  shapeKbDraft, LIMITS, KB_DRAFT_DETAIL_COLUMNS,
+} from '../../../../../../lib/botHelpdeskWrite'
 
 export const runtime = 'nodejs'
 
@@ -65,4 +74,73 @@ export async function GET(req) {
     data: articles,
     pagination: { limit, offset, total: count ?? null },
   }, { count: articles.length })
+}
+
+const CREATE_FIELDS = ['title', 'body', 'tags', 'category_id', 'ticket_id']
+const DRAFT_ONLY = "Bot KB articles are always created as drafts with a generated slug; 'status', 'published_at' and 'slug' can't be set."
+
+export async function POST(req) {
+  const auth = await requireBotWrite(req, 'kb:write', { targetType: 'kb_article' })
+  if (auth.error) return auth.error
+  const { admin, actor } = auth
+
+  return withValidation(auth, req, async (ctx) => {
+    const body = await readBody(req, ctx)
+    allowKeys(body, CREATE_FIELDS, { status: DRAFT_ONLY, published_at: DRAFT_ONLY, slug: DRAFT_ONLY })
+    const title = strField(body, 'title', { required: true, max: LIMITS.title })
+    const text = strField(body, 'body', { required: true, max: LIMITS.kbBody })
+    const tags = tagsField(body) ?? []
+    const categoryId = uuidField(body, 'category_id', { nullable: true })
+    const category = categoryId ? await loadKbCategory(admin, categoryId) : null
+    const ticket = body.ticket_id != null ? await loadReferencedTicket(admin, 'ticket_id', body.ticket_id) : null
+
+    const idem = await requireIdempotencyKey(auth, req)
+    if (idem.error) return idem.error
+
+    const baseSlug = slugify(title)
+    const row = {
+      title, body: text, tags, category_id: category?.id ?? null,
+      status: 'draft', published_at: null, author_id: actor.id, via_client_id: auth.client.id,
+    }
+    const linkedTicket = ticket ? { id: ticket.id, number: ticket.number } : null
+
+    if (auth.dryRun) {
+      const wouldBe = shapeKbDraft({
+        ...row, id: null, slug: baseSlug,
+        category: category ? { name: category.name, slug: category.slug } : null,
+        created_at: null, updated_at: null,
+      })
+      return botWriteJson(auth, req, { data: { ...wouldBe, url: null }, linked_ticket: linkedTicket, dry_run: true },
+        { summary: ctx.summary })
+    }
+
+    return runWrite(auth, req, { route: 'POST /helpdesk/kb', body, idemKey: idem.key, summary: ctx.summary }, async () => {
+      const insert = slug => admin.from('kb_articles').insert({ ...row, slug }).select(KB_DRAFT_DETAIL_COLUMNS).single()
+      // Same duplicate-slug retry as /helpdesk/kb/manage.
+      let res = await insert(baseSlug)
+      if (res.error?.code === '23505') res = await insert(`${baseSlug}-${Date.now().toString(36).slice(-4)}`)
+      if (res.error) {
+        console.error('bot kb create:', res.error.message)
+        return { error: { status: 500, code: 'internal_error', message: 'Could not create the article.' } }
+      }
+      const article = res.data
+
+      // The article exists either way, so a link failure is reported, not returned as an error.
+      const warnings = []
+      let linked = null
+      if (ticket) {
+        const { error: lErr } = await admin.from('kb_article_tickets')
+          .insert({ article_id: article.id, ticket_id: ticket.id, linked_by: actor.id })
+        if (lErr) {
+          console.error('bot kb create link:', lErr.message)
+          warnings.push(`Draft created, but linking ticket #${ticket.number} failed. Link it with POST /helpdesk/tickets/${ticket.number}/kb-links.`)
+        } else linked = linkedTicket
+      }
+      return {
+        status: 201,
+        body: { data: shapeKbDraft(article), linked_ticket: linked, ...(warnings.length ? { warnings } : {}) },
+        targetIds: [article.id],
+      }
+    })
+  })
 }

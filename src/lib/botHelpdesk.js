@@ -1,5 +1,5 @@
-// Shared pieces for the read-only Help Desk bot routes
-// (src/app/api/bot/v1/helpdesk/*). Explicit column lists only — the bot API
+// Shared pieces for the Help Desk bot routes (src/app/api/bot/v1/helpdesk/*;
+// write-side validation lives in botHelpdeskWrite.js). Explicit column lists only — the bot API
 // reads through the service role (RLS bypassed), so every select must name
 // exactly what may leave the building, and published-only / internal-comment
 // filtering has to happen here, not in policies.
@@ -24,6 +24,36 @@ export const isUuid = (v) => UUID_RE.test(String(v || ''))
 
 const baseUrl = () => process.env.APP_BASE_URL || 'https://www.prstech.app'
 
+function cleanId(raw) {
+  const s = String(raw ?? '')
+  try { return decodeURIComponent(s).trim() } catch { return s.trim() }
+}
+
+// Ticket by uuid or number (`1042` / `#1042`).
+// → { id, ticket } (ticket null = not found), { id, invalid: true }, or { id, error }.
+export async function findTicket(admin, rawId, columns = TICKET_COLUMNS) {
+  const id = cleanId(rawId).replace(/^#/, '')
+  let query = admin.from('tickets').select(columns)
+  if (isUuid(id)) query = query.eq('id', id)
+  else if (/^\d{1,18}$/.test(id)) query = query.eq('number', id)
+  else return { id, invalid: true }
+  const { data, error } = await query.maybeSingle()
+  return error ? { id, error } : { id, ticket: data || null }
+}
+
+// KB article by uuid or slug, optionally restricted to one status.
+// → { id, article }, { id, invalid: true }, or { id, error } (same as findTicket).
+export async function findKbArticle(admin, rawId, columns, { status } = {}) {
+  const id = cleanId(rawId)
+  let query = admin.from('kb_articles').select(columns)
+  if (status) query = query.eq('status', status)
+  if (isUuid(id)) query = query.eq('id', id)
+  else if (/^[a-z0-9-]{1,200}$/i.test(id)) query = query.eq('slug', id.toLowerCase())
+  else return { id, invalid: true }
+  const { data, error } = await query.maybeSingle()
+  return error ? { id, error } : { id, article: data || null }
+}
+
 // Integer query param clamped to [min, max]; blank/garbage → fallback.
 export function intParam(sp, name, fallback, min, max) {
   const n = parseInt(sp.get(name) ?? '', 10)
@@ -37,7 +67,7 @@ export function searchTerm(sp) {
   return String(sp.get('q') || '').replace(/[,()*%\\"]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200)
 }
 
-function person(p) {
+export function person(p) {
   return p ? { id: p.id, name: p.full_name || null, email: p.email || null } : null
 }
 
