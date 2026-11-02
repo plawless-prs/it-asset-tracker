@@ -279,14 +279,27 @@ function isBlankRow(row) {
   return !row || row.every(c => c === null || c === undefined || String(c).trim() === '')
 }
 
+// Shown under the Cost multiplier field on the mapping and PDF entry pages.
+// 0.81 means × 0.81. It is not "81% off list" — discount % is the other field.
+export const COST_MULTIPLIER_HELP = 'New cost = (cost, or list if no cost) × multiplier.'
+
 // Turn a sheet's 2-D rows into pu_lines-shaped objects using a mapping config:
 //   { sheet, header_row, skip_rows, columns:{field->colIndex}, transforms }
 // transforms: { multiplier, discount_pct, strip_prefix }
-//   - discount_pct: net cost = list * (1 - pct/100), used only when no cost column
-//   - multiplier:   net cost = cost * multiplier
+//   - discount_pct: when THAT ROW's cost is blank (null, not zero), net cost =
+//       list * (1 - pct/100). Runs before the multiplier, so a discount-derived
+//       cost is then multiplied. A present cost is left alone. This is per row,
+//       not "only when the file has no cost column".
+//   - multiplier: straight multiplication, never a percent-off.
+//       present cost (including an explicit 0) → cost × multiplier
+//       still-blank cost with a list → list × multiplier
+//       The list fallback is per row, so a file that maps a cost column still
+//       prices the blank-cost rows from list when a multiplier is set.
 //   - strip_prefix: removed from the start of vendor_item_no
-// Returns { lines, skippedNoPrice, dataRows }. Lines with no usable price
-// (both cost and list null) are skipped and counted — blank is not zero.
+// Returns { lines, skippedNoPrice, dataRows, missingCost, derivedFromList,
+// multiplierExample }. Lines with no usable price (both cost and list null)
+// are skipped and counted — blank is not zero. Stored pu_lines are not
+// rewritten until this mapping is applied again.
 export function buildLinesFromRows(rows, config = {}) {
   const cols = config.columns || {}
   const t = config.transforms || {}
@@ -307,6 +320,11 @@ export function buildLinesFromRows(rows, config = {}) {
 
   const lines = []
   let skippedNoPrice = 0
+  let missingCost = 0
+  let derivedFromList = 0
+  // First worked example of the multiplier. A list fallback replaces an
+  // earlier cost example, because that is the case the preview needs to show.
+  let multiplierExample = null
 
   for (let i = startIdx; i < rows.length; i++) {
     const row = rows[i] || []
@@ -317,18 +335,38 @@ export function buildLinesFromRows(rows, config = {}) {
       vendorItem = vendorItem.slice(prefix.length).trim() || null
     }
 
-    let newCost = parseNumber(cellOf(row, 'cost'))
+    const rawCost = parseNumber(cellOf(row, 'cost'))
+    let newCost = rawCost
     let newList = parseNumber(cellOf(row, 'list'))
 
     if (newCost === null && discount !== null && newList !== null) {
       newCost = newList * (1 - discount / 100)
     }
-    if (mult !== null && newCost !== null) newCost = newCost * mult
+
+    let exampleSource = null
+    let exampleBase = null
+    if (newCost === null && mult !== null && newList !== null) {
+      exampleSource = 'list'
+      exampleBase = newList
+      newCost = newList * mult
+      derivedFromList++
+    } else if (mult !== null && newCost !== null) {
+      exampleSource = rawCost !== null ? 'cost' : null
+      exampleBase = newCost
+      newCost = newCost * mult
+    }
 
     if (newCost !== null) newCost = Math.round(newCost * 10000) / 10000
     if (newList !== null) newList = Math.round(newList * 10000) / 10000
 
     if (newCost === null && newList === null) { skippedNoPrice++; continue }
+
+    if (newCost === null) missingCost++
+    if (exampleSource === 'list' && multiplierExample?.source !== 'list') {
+      multiplierExample = { source: 'list', item: vendorItem, base: exampleBase, multiplier: mult, newCost }
+    } else if (exampleSource === 'cost' && !multiplierExample) {
+      multiplierExample = { source: 'cost', item: vendorItem, base: exampleBase, multiplier: mult, newCost }
+    }
 
     lines.push({
       row_number: i + 1,
@@ -342,7 +380,93 @@ export function buildLinesFromRows(rows, config = {}) {
     })
   }
 
-  return { lines, skippedNoPrice, dataRows: Math.max(0, rows.length - startIdx) }
+  return {
+    lines,
+    skippedNoPrice,
+    dataRows: Math.max(0, rows.length - startIdx),
+    missingCost,
+    derivedFromList,
+    multiplierExample,
+  }
+}
+
+// True when a pu_lines.new_cost value would ship as an empty P21 cell.
+// Explicit 0 is a real cost. Blank / non-numeric is missing.
+export function isMissingNewCost(v) {
+  if (v === null || v === undefined || v === '') return true
+  const n = Number(v)
+  return !Number.isFinite(n)
+}
+
+// Included + matched rows (the export set) that have no new cost. P21 treats
+// a blank New Cost cell as "no change", so export must refuse the file rather
+// than write those cells. Returns null when every row has a cost.
+export function exportMissingCostRefusal(rows) {
+  const n = (rows || []).filter(r => isMissingNewCost(r.new_cost)).length
+  if (!n) return null
+  const lines = n === 1 ? '1 included matched line has' : `${n} included matched lines have`
+  return {
+    status: 422,
+    error: `${lines} no new cost. A blank New Cost cell would reach P21 as no change — set a cost on each of those lines before exporting.`,
+  }
+}
+
+// Worked example for the mapping / PDF preview, once a multiplier parsed and
+// at least one priced line shows what it did.
+export function multiplierExampleText(example) {
+  if (!example || example.multiplier == null || example.newCost == null) return null
+  const product = `${formatCurrency(example.base)} × ${example.multiplier} = ${formatCurrency(example.newCost)}`
+  if (example.source === 'list') {
+    const who = example.item ? `${example.item} has no cost` : 'A row has no cost'
+    return `Example: ${who}, so new cost = list ${product}.`
+  }
+  return `Example: new cost = cost ${product}.`
+}
+
+// Count note when more than one row took the list × multiplier path.
+export function listMultiplierNote(count) {
+  const n = Number(count) || 0
+  if (n <= 1) return null
+  return `${n} lines had no cost, so their new cost is list × multiplier.`
+}
+
+// Mapping / PDF preview warning. `missingCost` counts lines that will be
+// stored with a null new_cost (they have a list, and neither a cost, a
+// multiplier, nor a discount produced one).
+export function previewMissingCostWarning(missingCost) {
+  const n = Number(missingCost) || 0
+  if (n <= 0) return null
+  const lines = n === 1 ? '1 line has' : `${n} lines have`
+  return `${lines} no new cost. Export is refused for any included matched line that is still missing one. Set a cost multiplier (a blank cost becomes list × multiplier) or a discount % off list, or map a cost column.`
+}
+
+export function costPreviewNotices(preview) {
+  if (!preview) return { warning: null, note: null, example: null }
+  return {
+    warning: previewMissingCostWarning(preview.missingCost),
+    note: listMultiplierNote(preview.derivedFromList),
+    example: multiplierExampleText(preview.multiplierExample),
+  }
+}
+
+// Batch-detail warning. `missing` is every stored line with a null new_cost.
+// `blocking` is the included + matched subset, which is what export refuses.
+// Already-stored lines keep their costs until the mapping is re-applied.
+export function batchMissingCostWarning(missing, blocking, { editable = true } = {}) {
+  const n = Number(missing) || 0
+  const b = Number(blocking) || 0
+  if (n <= 0) return null
+  const head = n === 1 ? '1 line has no new cost.' : `${n} lines have no new cost.`
+  const fix = editable
+    ? 'Re-apply the column mapping (a blank cost becomes list × multiplier) or type a new cost on the line. Lines already stored do not change until the mapping is re-applied.'
+    : 'This batch is locked, so re-create it and re-apply the mapping (a blank cost becomes list × multiplier). Lines already stored do not change on their own.'
+  if (b > 0) {
+    const mid = b === 1
+      ? '1 included matched line has no new cost, so export will be refused until it has one.'
+      : `${b} included matched lines have no new cost, so export will be refused until each has one.`
+    return `${head} ${mid} ${fix}`
+  }
+  return `${head} None are included and matched, so export is not blocked yet. An included matched line with no new cost is refused at export. ${fix}`
 }
 
 // --- Matching / flags (Phase 3) ---------------------------------------------

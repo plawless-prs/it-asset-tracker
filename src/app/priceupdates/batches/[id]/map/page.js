@@ -5,8 +5,9 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '../../../../../lib/supabase'
 import { useRole } from '../../../../../lib/useRole'
-import { MAPPING_FIELDS, buildLinesFromRows, formatCurrency, colLabel, guessHeaderRow, guessColumns } from '../../../../../lib/priceupdates'
+import { MAPPING_FIELDS, buildLinesFromRows, formatCurrency, colLabel, guessHeaderRow, guessColumns, COST_MULTIPLIER_HELP, costPreviewNotices } from '../../../../../lib/priceupdates'
 import { fetchParsedSheets, applyParse, triggerMatch } from '../../../../../lib/priceupdatesParse'
+import CostPreviewNotices from '../../../../../components/CostPreviewNotices'
 
 const SPREADSHEET = /\.(xlsx|xls|csv)$/i
 
@@ -106,9 +107,10 @@ export default function MapBatch() {
   }), [sheetName, headerRow, columns, transforms])
 
   const preview = useMemo(() => {
-    if (!activeSheet) return { lines: [], skippedNoPrice: 0 }
+    if (!activeSheet) return { lines: [], skippedNoPrice: 0, missingCost: 0, derivedFromList: 0, multiplierExample: null }
     return buildLinesFromRows(rows, config)
   }, [activeSheet, rows, config])
+  const notices = useMemo(() => costPreviewNotices(preview), [preview])
 
   const hasItem = columns.vendor_item_no !== undefined && columns.vendor_item_no !== ''
   const hasPrice = ['cost', 'list'].some(k => columns[k] !== undefined && columns[k] !== '')
@@ -263,12 +265,12 @@ export default function MapBatch() {
               <div style={{ fontSize: '11.5px', color: '#5a6e84', marginBottom: '12px' }}>Applied to every line as each is parsed.</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <div>
-                  <label style={labelStyle}>Cost multiplier</label>
-                  <input style={inputStyle} value={transforms.multiplier} onChange={e => setTransforms(t => ({ ...t, multiplier: e.target.value }))} placeholder="e.g. 0.85" />
+                  <label style={{ ...labelStyle, textTransform: 'none', letterSpacing: 0, fontSize: '12px', color: '#8aa0b8', fontWeight: '500' }}>{COST_MULTIPLIER_HELP}</label>
+                  <input style={inputStyle} value={transforms.multiplier} onChange={e => setTransforms(t => ({ ...t, multiplier: e.target.value }))} placeholder="e.g. 0.81" />
                 </div>
                 <div>
                   <label style={labelStyle}>Discount % off list</label>
-                  <input style={inputStyle} value={transforms.discount_pct} onChange={e => setTransforms(t => ({ ...t, discount_pct: e.target.value }))} placeholder="e.g. 40 (used if no cost column)" />
+                  <input style={inputStyle} value={transforms.discount_pct} onChange={e => setTransforms(t => ({ ...t, discount_pct: e.target.value }))} placeholder="e.g. 40 (blank cost only, before the multiplier)" />
                 </div>
                 <div>
                   <label style={labelStyle}>Strip prefix from item #</label>
@@ -285,6 +287,7 @@ export default function MapBatch() {
                   {preview.lines.length} lines · {preview.skippedNoPrice} skipped
                 </div>
               </div>
+              <CostPreviewNotices notices={notices} />
               {preview.lines.length === 0 ? (
                 <div style={{ fontSize: '12px', color: '#4a5a6e' }}>Map an item # and a cost or list column to see parsed lines.</div>
               ) : (
@@ -294,8 +297,9 @@ export default function MapBatch() {
                       <span style={{ color: '#c0cad8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {l.vendor_item_no || '—'}
                       </span>
-                      <span style={{ whiteSpace: 'nowrap' }}>
+                      <span style={{ whiteSpace: 'nowrap', color: l.new_cost == null ? '#fbbf24' : undefined }}>
                         {formatCurrency(l.new_cost)}{l.new_list != null ? ` / ${formatCurrency(l.new_list)}` : ''}
+                        {l.new_cost == null ? ' · no cost' : ''}
                       </span>
                     </div>
                   ))}

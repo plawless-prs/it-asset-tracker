@@ -6,15 +6,16 @@
 // File name is `<vendor P21 prefix><effective year>.txt` (e.g. GAT2026.txt).
 //
 // Only lines that are included AND matched are exported. P21 treats a blank
-// cell as "no change", so a cost-only / list-only line leaves the other price
-// column empty rather than restating the mirror's current value.
+// cell as "no change", so a cost-only line leaves List Price empty rather than
+// restating the mirror's current value. A blank New Cost is refused (422) —
+// it must not ship as a silent no-change. See exportMissingCostRefusal().
 //
 // Auth mirrors /api/priceupdates/parse-file: Bearer token whose profile has
 // `priceupdates` access (admins always). Writes the file to the private
 // `price-files` bucket via the service role and returns a short-lived signed
 // URL for immediate download.
 import { createAdminClient } from '../../../../lib/supabaseAdmin'
-import { slugify, dateFolderMMDDYY } from '../../../../lib/priceupdates'
+import { slugify, dateFolderMMDDYY, exportMissingCostRefusal } from '../../../../lib/priceupdates'
 
 export const runtime = 'nodejs'
 
@@ -77,6 +78,10 @@ export async function POST(req) {
   if (rows.length === 0) {
     return Response.json({ error: 'no included matched lines to export' }, { status: 422 })
   }
+  // Refuse before any file is written. A blank New Cost would reach P21 as
+  // "no change" and leave the supplier cost untouched.
+  const missingCost = exportMissingCostRefusal(rows)
+  if (missingCost) return Response.json({ error: missingCost.error }, { status: missingCost.status })
 
   const lines = ['Item ID\tList Price\tNew Cost\tSupplier ID']
   for (const r of rows) {

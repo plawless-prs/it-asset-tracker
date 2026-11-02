@@ -8,7 +8,7 @@ import { useRole } from '../../../../lib/useRole'
 import {
   BATCH_STATUS_META, SOURCE_META, MATCH_META, FLAG_META,
   formatCurrency, formatDate, formatPct, relativeTime,
-  costChangePct, computeFlag, normalizePart,
+  costChangePct, computeFlag, normalizePart, batchMissingCostWarning,
 } from '../../../../lib/priceupdates'
 import { fetchParsedSheets, applyParse, triggerMatch, generateExport, uploadBatchFiles, createBatchFromFiles } from '../../../../lib/priceupdatesParse'
 import { useToasts, Toasts } from '../../../../components/Toast'
@@ -59,7 +59,7 @@ export default function BatchDetail() {
   const [page, setPage] = useState(0)
   const [lines, setLines] = useState([])
   const [tabTotal, setTabTotal] = useState(0)
-  const [counts, setCounts] = useState({ all: 0, flagged: 0, ambiguous: 0, unmatched: 0, excluded: 0, ambiguousUnpicked: 0 })
+  const [counts, setCounts] = useState({ all: 0, flagged: 0, ambiguous: 0, unmatched: 0, excluded: 0, ambiguousUnpicked: 0, missingCost: 0, missingCostBlocking: 0 })
 
   const [selected, setSelected] = useState(() => new Set())
   // "Every line in the current tab" selection (spans all pages). Bulk actions
@@ -133,13 +133,15 @@ export default function BatchDetail() {
   async function loadCounts() {
     const head = { count: 'exact', head: true }
     const base = () => supabase.from('pu_lines').select('id', head).eq('batch_id', id)
-    const [all, flagged, ambiguous, unmatched, excluded, amb] = await Promise.all([
+    const [all, flagged, ambiguous, unmatched, excluded, amb, missingCost, missingCostBlocking] = await Promise.all([
       base(),
       tabFilter(base(), 'flagged'),
       tabFilter(base(), 'ambiguous'),
       tabFilter(base(), 'unmatched'),
       tabFilter(base(), 'excluded'),
       base().eq('include', true).eq('match_status', 'ambiguous').is('p21_item_id', null),
+      base().is('new_cost', null),
+      base().eq('include', true).eq('match_status', 'matched').is('new_cost', null),
     ])
     setCounts({
       all: all.count || 0,
@@ -148,6 +150,8 @@ export default function BatchDetail() {
       unmatched: unmatched.count || 0,
       excluded: excluded.count || 0,
       ambiguousUnpicked: amb.count || 0,
+      missingCost: missingCost.count || 0,
+      missingCostBlocking: missingCostBlocking.count || 0,
     })
   }
 
@@ -680,6 +684,7 @@ export default function BatchDetail() {
   const pageCount = Math.max(1, Math.ceil(tabTotal / PAGE_SIZE))
   const allOnPageSelected = lines.length > 0 && lines.every(l => selected.has(l.id))
   const canApprove = batch.status === 'needs_review' && counts.ambiguousUnpicked === 0 && counts.all > 0
+  const costWarn = batchMissingCostWarning(counts.missingCost, counts.missingCostBlocking, { editable })
 
   return (
     <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
@@ -711,6 +716,11 @@ export default function BatchDetail() {
 
       {notice && <div style={{ padding: '10px 14px', borderRadius: '10px', marginBottom: '10px', fontSize: '12.5px', backgroundColor: '#13202e', color: '#7fb4f5', border: '1px solid #1e3a5f', flexShrink: 0 }}>{notice}</div>}
       {error && <div style={{ padding: '10px 14px', borderRadius: '10px', marginBottom: '10px', fontSize: '12.5px', backgroundColor: '#330d0d', color: '#f87171', border: '1px solid #991b1b', flexShrink: 0 }}>{error}</div>}
+      {costWarn && (
+        <div style={{ padding: '10px 14px', borderRadius: '10px', marginBottom: '10px', fontSize: '12.5px', lineHeight: 1.45, backgroundColor: '#332300', color: '#fbbf24', border: '1px solid #78500e', flexShrink: 0 }}>
+          {costWarn}
+        </div>
+      )}
 
       {/* Two panes */}
       <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', flex: 1, minHeight: 0 }}>
@@ -1174,14 +1184,16 @@ function EditableNum({ line, field, editing, setEditing, save, editable }) {
     )
   }
   const v = line[field]
+  const missingCost = field === 'new_cost' && (v === null || v === undefined || v === '')
   return (
     <div
       onClick={() => { if (editable) setEditing({ lineId: line.id, field }) }}
-      title={editable ? 'Click to edit' : ''}
+      title={missingCost ? 'No new cost — export is refused while this line is included and matched' : (editable ? 'Click to edit' : '')}
       style={{
-        textAlign: 'right', color: field === 'new_cost' ? '#c0cad8' : '#8aa0b8',
+        textAlign: 'right', color: missingCost ? '#fbbf24' : field === 'new_cost' ? '#c0cad8' : '#8aa0b8',
         cursor: editable ? 'pointer' : 'default',
         textDecoration: editable ? 'underline dotted #2a3a50' : 'none', textUnderlineOffset: '3px',
+        fontWeight: missingCost ? '600' : '400',
       }}
     >{formatCurrency(v)}</div>
   )
