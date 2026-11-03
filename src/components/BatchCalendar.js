@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { createClient } from '../lib/supabase'
 import {
   BATCH_STATUS_META, attentionPill, batchReadiness, daysUntil, todayCentral,
@@ -18,13 +18,21 @@ import {
 //   onOpen(b)     navigate to a batch
 //   onCreate(iso) open the New Batch modal prefilled with the clicked day
 //   onChanged()   reload after a reschedule
-export default function BatchCalendar({ batches, onOpen, onCreate, onChanged }) {
+//   hideAgenda    omit the overdue/upcoming panel (dashboard). Agenda stays on
+//                 the batches Calendar tab.
+//   directOpen    pill click calls onOpen immediately and skips the peek card
+//                 (dashboard). Drag-to-reschedule still works; a completed drag
+//                 does not also open the batch.
+//   scrollWeeks   cap the week grid and scroll it inside the card (dashboard),
+//                 leaving month prev/next + Today in place. Off on the batches tab.
+export default function BatchCalendar({ batches, onOpen, onCreate, onChanged, hideAgenda = false, directOpen = false, scrollWeeks = false }) {
   const supabase = createClient()
   const today = todayCentral()
   const [month, setMonth] = useState(() => today.slice(0, 7))   // 'YYYY-MM'
   const [peek, setPeek] = useState(null)                        // { batch, x, y }
   const [dragId, setDragId] = useState(null)
   const [dropDay, setDropDay] = useState(null)
+  const didDrag = useRef(false)
 
   const scheduled = useMemo(
     () => (batches || []).filter(b => b.effective_date),
@@ -112,7 +120,7 @@ export default function BatchCalendar({ batches, onOpen, onCreate, onChanged }) 
       {/* Month grid */}
       <div style={{ flex: 1, minWidth: 0, backgroundColor: '#0f1620', border: '1px solid #182030', borderRadius: '14px', overflow: 'hidden' }}>
         {/* Toolbar */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', borderBottom: '1px solid #182030' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', borderBottom: '1px solid #182030', flexWrap: 'wrap' }}>
           <button onClick={() => { setMonth(today.slice(0, 7)); setPeek(null) }} style={{
             padding: '6px 14px', borderRadius: '8px', fontSize: '12.5px', fontWeight: '600',
             backgroundColor: '#131a24', color: '#60a5fa', border: '1px solid #1e3a5f', cursor: 'pointer',
@@ -121,7 +129,9 @@ export default function BatchCalendar({ batches, onOpen, onCreate, onChanged }) 
           <button onClick={() => shiftMonth(1)} style={{ background: 'none', border: 'none', color: '#8aa0b8', fontSize: '16px', cursor: 'pointer', padding: '2px 8px' }}>▶</button>
           <div style={{ fontSize: '15px', fontWeight: '700', color: '#e0e7f0' }}>{monthLabel}</div>
           <div style={{ marginLeft: 'auto', fontSize: '11.5px', color: '#5a6e84' }}>
-            Click a day to schedule a batch · drag a batch to reschedule
+            {directOpen
+              ? 'Click a batch to open it · click a day to schedule · drag to reschedule'
+              : 'Click a day to schedule a batch · drag a batch to reschedule'}
           </div>
         </div>
 
@@ -132,7 +142,8 @@ export default function BatchCalendar({ batches, onOpen, onCreate, onChanged }) 
           ))}
         </div>
 
-        {/* Weeks */}
+        {/* Weeks. Dashboard scrolls this block; the batches tab shows it in full. */}
+        <div style={scrollWeeks ? { maxHeight: 'calc(100vh - 320px)', overflowY: 'auto' } : undefined}>
         {weeks.map((row, wi) => (
           <div key={wi} style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: wi < 5 ? '1px solid #131c28' : 'none' }}>
             {row.map(cell => {
@@ -171,10 +182,17 @@ export default function BatchCalendar({ batches, onOpen, onCreate, onChanged }) 
                       <div
                         key={b.id}
                         draggable={draggable(b)}
-                        onDragStart={() => { setDragId(b.id); setPeek(null) }}
-                        onDragEnd={() => { setDragId(null); setDropDay(null) }}
+                        onDragStart={() => { didDrag.current = true; setDragId(b.id); setPeek(null) }}
+                        onDragEnd={() => {
+                          setDragId(null); setDropDay(null)
+                          // A click can follow dragend. Ignore that one so a reschedule
+                          // drag does not also open the batch (dashboard directOpen).
+                          setTimeout(() => { didDrag.current = false }, 0)
+                        }}
                         onClick={(e) => {
                           e.stopPropagation()
+                          if (didDrag.current) return
+                          if (directOpen) { onOpen?.(b); return }
                           setPeek(peek?.batch?.id === b.id ? null : { batch: b, x: e.clientX, y: e.clientY })
                         }}
                         title={`#${b.number} ${b.vendor?.name || 'Unidentified'} — ${meta.label}`}
@@ -200,9 +218,11 @@ export default function BatchCalendar({ batches, onOpen, onCreate, onChanged }) 
             })}
           </div>
         ))}
+        </div>
       </div>
 
-      {/* Agenda */}
+      {/* Agenda — batches Calendar tab only. The dashboard passes hideAgenda. */}
+      {!hideAgenda && (
       <div style={{ width: '270px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '12px' }}>
         {agenda.overdue.length > 0 && (
           <AgendaCard title={`Overdue (${agenda.overdue.length})`} titleColor="#f87171">
@@ -219,6 +239,7 @@ export default function BatchCalendar({ batches, onOpen, onCreate, onChanged }) 
           ))}
         </AgendaCard>
       </div>
+      )}
 
       {/* Peek card */}
       {peek && (

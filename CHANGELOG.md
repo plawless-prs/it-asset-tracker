@@ -2,6 +2,10 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-11-03
+
+- **Price Update Processor — dashboard calendar:** `/priceupdates` keeps the metric cards full width, then Recent batches beside the shared month calendar (stacks on a narrow screen). A pill opens that batch and the agenda/peek stay off; the batches Calendar tab is unchanged (peek card + overdue/upcoming list).
+
 ## 2026-11-02
 
 - **Price Update Processor — blank cost × multiplier:** a cost multiplier now fills a blank cost from list × multiplier (per row, even when a cost column is mapped). Rows that already have a cost stay cost × multiplier; discount % off list is unchanged and still runs first. Export returns 422 if any included matched line has no new cost, so a blank never reaches the P21 file as "no change". Mapping, PDF entry, and the batch page warn when lines have no new cost. Stored lines change only when the mapping is re-applied.

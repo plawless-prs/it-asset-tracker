@@ -4,8 +4,9 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { createClient } from '../../lib/supabase'
 import NewBatchModal from '../../components/NewBatchModal'
+import BatchCalendar from '../../components/BatchCalendar'
 import {
-  BATCH_STATUS_META, SOURCE_META, attentionPill, relativeTime, daysUntil,
+  BATCH_STATUS_META, attentionPill, relativeTime, daysUntil,
 } from '../../lib/priceupdates'
 
 function MetricCard({ label, value, accent }) {
@@ -35,18 +36,17 @@ export default function PriceUpdatesDashboard() {
   const [batches, setBatches] = useState([])
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
+  const [newDate, setNewDate] = useState(null)   // effective-date prefill from the calendar
 
-  useEffect(() => {
-    async function load() {
-      const { data } = await supabase
-        .from('pu_batches')
-        .select('id, number, source, status, received_at, applied_at, effective_date, line_count, matched_count, flagged_count, vendor:vendor_id(id, name), files:pu_batch_files(count)')
-        .order('received_at', { ascending: false })
-      setBatches((data || []).map(b => ({ ...b, file_count: b.files?.[0]?.count ?? 0 })))
-      setLoading(false)
-    }
-    load()
-  }, [])
+  async function load() {
+    const { data } = await supabase
+      .from('pu_batches')
+      .select('id, number, source, status, received_at, applied_at, effective_date, line_count, matched_count, flagged_count, vendor:vendor_id(id, name), files:pu_batch_files(count)')
+      .order('received_at', { ascending: false })
+    setBatches((data || []).map(b => ({ ...b, file_count: b.files?.[0]?.count ?? 0 })))
+    setLoading(false)
+  }
+  useEffect(() => { load() }, [])
 
   const now = new Date()
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
@@ -69,14 +69,14 @@ export default function PriceUpdatesDashboard() {
   const recent = batches.slice(0, 8)
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: '1100px' }}>
+    <div style={{ padding: '24px 28px', maxWidth: '1680px' }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <div>
           <h1 style={{ fontSize: '22px', fontWeight: '700', color: '#e0e7f0', margin: '0 0 2px' }}>Price Updates</h1>
           <p style={{ fontSize: '13px', color: '#5a6e84', margin: 0 }}>Dashboard</p>
         </div>
-        <button onClick={() => setShowNew(true)} style={{
+        <button onClick={() => { setNewDate(null); setShowNew(true) }} style={{
           backgroundColor: '#2563eb', color: '#fff', padding: '10px 18px', borderRadius: '10px',
           fontWeight: '600', fontSize: '13px', border: 'none', cursor: 'pointer',
         }}>+ New batch</button>
@@ -96,8 +96,14 @@ export default function PriceUpdatesDashboard() {
             <MetricCard label="Applied this month" value={metrics.appliedThisMonth} />
           </div>
 
-          {/* Recent batches */}
-          <div style={{ backgroundColor: '#0f1620', border: '1px solid #182030', borderRadius: '14px', overflow: 'hidden' }}>
+          {/* Recent batches (left) + month calendar (right). Stacks when narrow. */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 560px), 1fr))',
+            gap: '16px',
+            alignItems: 'start',
+          }}>
+          <div style={{ backgroundColor: '#0f1620', border: '1px solid #182030', borderRadius: '14px', overflow: 'auto', minWidth: 0 }}>
             <div style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
               padding: '14px 18px', borderBottom: '1px solid #182030',
@@ -119,7 +125,7 @@ export default function PriceUpdatesDashboard() {
             {recent.length === 0 ? (
               <div style={{ padding: '40px', textAlign: 'center', color: '#4a5a6e' }}>
                 No batches yet.{' '}
-                <button onClick={() => setShowNew(true)} style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', fontSize: '13px' }}>
+                <button onClick={() => { setNewDate(null); setShowNew(true) }} style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', fontSize: '13px' }}>
                   Create one →
                 </button>
               </div>
@@ -148,13 +154,27 @@ export default function PriceUpdatesDashboard() {
               )
             })}
           </div>
+
+          <div style={{ minWidth: 0 }}>
+            <BatchCalendar
+              batches={batches}
+              hideAgenda
+              directOpen
+              scrollWeeks
+              onOpen={(b) => router.push(`/priceupdates/batches/${b.id}`)}
+              onCreate={(iso) => { setNewDate(iso); setShowNew(true) }}
+              onChanged={load}
+            />
+          </div>
+          </div>
         </>
       )}
 
       {showNew && (
         <NewBatchModal
-          onClose={() => setShowNew(false)}
-          onCreated={(batch) => { setShowNew(false); router.push(`/priceupdates/batches/${batch.id}`) }}
+          defaultEffectiveDate={newDate}
+          onClose={() => { setShowNew(false); setNewDate(null) }}
+          onCreated={(batch) => { setShowNew(false); setNewDate(null); router.push(`/priceupdates/batches/${batch.id}`) }}
         />
       )}
     </div>
