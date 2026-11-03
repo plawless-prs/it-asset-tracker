@@ -2,6 +2,10 @@
 
 Notable changes to PRS Apps, newest first. Each entry is a date heading (`## YYYY-MM-DD`) followed by 1–2 line bullets. Routine/trivial changes live in git history, not here.
 
+## 2026-11-02
+
+- **Price Update Processor — blank cost × multiplier:** a cost multiplier now fills a blank cost from list × multiplier (per row, even when a cost column is mapped). Rows that already have a cost stay cost × multiplier; discount % off list is unchanged and still runs first. Export returns 422 if any included matched line has no new cost, so a blank never reaches the P21 file as "no change". Mapping, PDF entry, and the batch page warn when lines have no new cost. Stored lines change only when the mapping is re-applied.
+
 ## 2026-10-21
 
 - **Bot API — Daily Ops endpoints (no migration):** `dailyops:read` → today's checklists (lazily creates today's instances, like a page load) + tasks list/detail; `dailyops:write` → create/update tasks and check off today's checklist items (instance status recomputed). The Tasks page now shows "created by <name>"; no email.

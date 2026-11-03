@@ -14,8 +14,10 @@ import { createClient } from '../../../../../lib/supabase'
 import { useRole } from '../../../../../lib/useRole'
 import {
   MAPPING_FIELDS, buildLinesFromRows, formatCurrency, colLabel, guessColumns, parseNumber,
+  COST_MULTIPLIER_HELP, costPreviewNotices,
 } from '../../../../../lib/priceupdates'
 import { applyParse, triggerMatch } from '../../../../../lib/priceupdatesParse'
+import CostPreviewNotices from '../../../../../components/CostPreviewNotices'
 
 const PDF = /\.pdf$/i
 
@@ -134,6 +136,7 @@ export default function PdfEntry() {
   }), [hasHeader, columns, transforms])
 
   const preview = useMemo(() => buildLinesFromRows(rows, config), [rows, config])
+  const notices = useMemo(() => costPreviewNotices(preview), [preview])
 
   const editable = batch && ['received', 'parsing', 'needs_review', 'failed'].includes(batch.status)
   const hasItem = columns.vendor_item_no !== undefined && columns.vendor_item_no !== ''
@@ -306,12 +309,12 @@ export default function PdfEntry() {
             <div style={{ fontSize: '13px', fontWeight: '600', color: '#c0cad8', marginBottom: '4px' }}>Transforms <span style={{ color: '#5a6e84', fontWeight: '400' }}>(optional)</span></div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '8px' }}>
               <div>
-                <label style={labelStyle}>Cost multiplier</label>
-                <input style={inputStyle} value={transforms.multiplier} onChange={e => setTransforms(t => ({ ...t, multiplier: e.target.value }))} placeholder="e.g. 0.85" disabled={!editable} />
+                <label style={{ ...labelStyle, textTransform: 'none', letterSpacing: 0, fontSize: '12px', color: '#8aa0b8', fontWeight: '500' }}>{COST_MULTIPLIER_HELP}</label>
+                <input style={inputStyle} value={transforms.multiplier} onChange={e => setTransforms(t => ({ ...t, multiplier: e.target.value }))} placeholder="e.g. 0.81" disabled={!editable} />
               </div>
               <div>
                 <label style={labelStyle}>Discount % off list</label>
-                <input style={inputStyle} value={transforms.discount_pct} onChange={e => setTransforms(t => ({ ...t, discount_pct: e.target.value }))} placeholder="e.g. 40 (used if no cost column)" disabled={!editable} />
+                <input style={inputStyle} value={transforms.discount_pct} onChange={e => setTransforms(t => ({ ...t, discount_pct: e.target.value }))} placeholder="e.g. 40 (blank cost only, before the multiplier)" disabled={!editable} />
               </div>
               <div>
                 <label style={labelStyle}>Strip prefix from item #</label>
@@ -327,6 +330,7 @@ export default function PdfEntry() {
                 {preview.lines.length} lines · {preview.skippedNoPrice} skipped
               </div>
             </div>
+            <CostPreviewNotices notices={notices} />
             {preview.lines.length === 0 ? (
               <div style={{ fontSize: '12px', color: '#4a5a6e' }}>Paste rows and map an item # plus a cost or list column.</div>
             ) : (
@@ -336,8 +340,9 @@ export default function PdfEntry() {
                     <span style={{ color: '#c0cad8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {l.vendor_item_no || '—'}
                     </span>
-                    <span style={{ whiteSpace: 'nowrap' }}>
+                    <span style={{ whiteSpace: 'nowrap', color: l.new_cost == null ? '#fbbf24' : undefined }}>
                       {formatCurrency(l.new_cost)}{l.new_list != null ? ` / ${formatCurrency(l.new_list)}` : ''}
+                      {l.new_cost == null ? ' · no cost' : ''}
                     </span>
                   </div>
                 ))}
